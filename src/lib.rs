@@ -31,6 +31,24 @@ pub struct RunOptions {
     pub cache_dir: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BuildOptions {
+    pub script: PathBuf,
+    pub extra_deps: Vec<String>,
+    pub classpath: Vec<PathBuf>,
+    pub javac_options: Vec<String>,
+    pub main_class: Option<String>,
+    pub cache_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuildOutput {
+    pub classes_dir: PathBuf,
+    pub classpath: Vec<PathBuf>,
+    pub main_class: Option<String>,
+    pub directives: Directives,
+}
+
 pub fn parse_directives(source: &str) -> Directives {
     let mut directives = Directives::default();
     let directive_re =
@@ -112,7 +130,7 @@ fn split_words(text: &str, comma_semicolon_are_separators: bool) -> Vec<String> 
     out
 }
 
-pub fn run_java(options: RunOptions) -> Result<i32> {
+pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     let script = fs::canonicalize(&options.script)
         .with_context(|| format!("script not found: {}", options.script.display()))?;
     let source = fs::read_to_string(&script)
@@ -120,7 +138,6 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
     let mut directives = parse_directives(&source);
     directives.deps.extend(options.extra_deps);
     directives.javac_options.extend(options.javac_options);
-    directives.runtime_options.extend(options.runtime_options);
     if options.main_class.is_some() {
         directives.main_class = options.main_class;
     }
@@ -172,34 +189,62 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
         .status()
         .with_context(|| format!("failed to execute {javac}"))?;
     if !status.success() {
-        return Ok(status.code().unwrap_or(1));
+        return Err(anyhow!(
+            "javac failed with exit code {}",
+            status.code().unwrap_or(1)
+        ));
     }
 
     copy_declared_files(base_dir, &classes_dir, &directives.files)?;
 
     let main_class = directives
         .main_class
-        .or_else(|| infer_main_class(&script, &source))
-        .ok_or_else(|| {
-            anyhow!("could not infer main class; add //MAIN fully.qualified.ClassName")
-        })?;
+        .clone()
+        .or_else(|| infer_main_class(&script, &source));
 
-    let java = java_for(&directives.java_version);
-    let mut runtime_cp = vec![classes_dir];
-    runtime_cp.extend(cp_entries);
+    Ok(BuildOutput {
+        classes_dir,
+        classpath: cp_entries,
+        main_class,
+        directives,
+    })
+}
+
+pub fn run_java(options: RunOptions) -> Result<i32> {
+    let script_args = options.script_args;
+    let runtime_options = options.runtime_options;
+    let build = build_java(BuildOptions {
+        script: options.script,
+        extra_deps: options.extra_deps,
+        classpath: options.classpath,
+        javac_options: options.javac_options,
+        main_class: options.main_class,
+        cache_dir: options.cache_dir,
+    })?;
+
+    let main_class = build.main_class.ok_or_else(|| {
+        anyhow!("could not infer main class; add //MAIN fully.qualified.ClassName")
+    })?;
+
+    let java = java_for(&build.directives.java_version);
+    let mut runtime_cp = vec![build.classes_dir];
+    runtime_cp.extend(build.classpath);
     let mut java_cmd = Command::new(&java);
-    java_cmd.args(&directives.runtime_options);
-    if directives.enable_preview
-        && !directives
+    java_cmd.args(&build.directives.runtime_options);
+    java_cmd.args(&runtime_options);
+    if build.directives.enable_preview
+        && !build
+            .directives
             .runtime_options
             .iter()
+            .chain(runtime_options.iter())
             .any(|o| o == "--enable-preview")
     {
         java_cmd.arg("--enable-preview");
     }
     java_cmd.arg("-cp").arg(join_classpath(&runtime_cp));
     java_cmd.arg(main_class);
-    java_cmd.args(options.script_args);
+    java_cmd.args(script_args);
     let status = java_cmd
         .status()
         .with_context(|| format!("failed to execute {java}"))?;
