@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use doj::{run_java, RunOptions};
+use doj::{build_java, run_java, BuildOptions, RunOptions};
 
 #[derive(Parser, Debug)]
 #[command(name = "doj", version, about = "do Java: a Rust port of JBang")]
@@ -22,6 +22,8 @@ struct Cli {
 enum Commands {
     /// Compile and run a Java source file.
     Run(RunCommand),
+    /// Compile and store script in the cache without running it.
+    Build(BuildCommand),
     /// Print parsed JBang directives.
     Info(InfoCommand),
 }
@@ -61,6 +63,32 @@ struct RunCommand {
 }
 
 #[derive(Parser, Debug)]
+struct BuildCommand {
+    /// Additional dependency coordinates, same shape as //DEPS.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
+
+    /// Additional classpath entries.
+    #[arg(long = "class-path", alias = "cp")]
+    classpath: Vec<PathBuf>,
+
+    /// Additional javac option.
+    #[arg(long = "javac-option")]
+    javac_options: Vec<String>,
+
+    /// Override //MAIN / inferred class name.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Java source file.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
 struct InfoCommand {
     /// Java source file.
     script: PathBuf,
@@ -79,6 +107,17 @@ fn main() -> Result<()> {
             main_class: cmd.main_class,
             cache_dir: cmd.cache_dir,
         })?,
+        Some(Commands::Build(cmd)) => {
+            build_java(BuildOptions {
+                script: cmd.script,
+                extra_deps: cmd.deps,
+                classpath: cmd.classpath,
+                javac_options: cmd.javac_options,
+                main_class: cmd.main_class,
+                cache_dir: cmd.cache_dir,
+            })?;
+            0
+        }
         Some(Commands::Info(cmd)) => {
             let source = std::fs::read_to_string(&cmd.script)?;
             println!("{:#?}", doj::parse_directives(&source));
