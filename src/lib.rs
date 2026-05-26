@@ -49,6 +49,80 @@ pub struct BuildOutput {
     pub directives: Directives,
 }
 
+#[derive(Debug, Clone)]
+pub struct InitOptions {
+    pub script: PathBuf,
+    pub deps: Vec<String>,
+    pub java_version: Option<String>,
+    pub force: bool,
+}
+
+pub fn init_script(options: InitOptions) -> Result<PathBuf> {
+    if options.script.exists() && !options.force {
+        return Err(anyhow!(
+            "file {} already exists; use --force to overwrite",
+            options.script.display()
+        ));
+    }
+
+    let base_name = options
+        .script
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| {
+            anyhow!(
+                "could not infer class name from {}",
+                options.script.display()
+            )
+        })?;
+    if !is_java_identifier(base_name) {
+        return Err(anyhow!(
+            "'{base_name}' is not a valid class name in Java; use a Java identifier filename"
+        ));
+    }
+
+    if let Some(parent) = options
+        .script
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    fs::write(
+        &options.script,
+        render_default_init_script(base_name, &options),
+    )?;
+    Ok(options.script)
+}
+
+fn render_default_init_script(base_name: &str, options: &InitOptions) -> String {
+    let mut out = String::from("///usr/bin/env jbang \"$0\" \"$@\" ; exit $?\n");
+    if let Some(version) = &options.java_version {
+        out.push_str(&format!("//JAVA {version}\n"));
+    }
+    for dep in &options.deps {
+        out.push_str(&format!("//DEPS {dep}\n"));
+    }
+    if options.deps.is_empty() {
+        out.push_str("// //DEPS <dependency1> <dependency2>\n");
+    }
+    out.push_str("import static java.lang.System.*;\n\n");
+    out.push_str(&format!(
+        "public class {base_name} {{\n\n    public static void main(String... args) {{\n        out.println(\"Hello World\");\n    }}\n}}\n"
+    ));
+    out
+}
+
+fn is_java_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first == '$' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch == '$' || ch.is_ascii_alphanumeric())
+}
+
 pub fn parse_directives(source: &str) -> Directives {
     let mut directives = Directives::default();
     let directive_re =

@@ -2,7 +2,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use doj::{build_java, run_java, BuildOptions, RunOptions};
+use doj::{
+    build_java, init_script, run_java, split_directive_words, BuildOptions, InitOptions, RunOptions,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "doj", version, about = "do Java: a Rust port of JBang")]
@@ -24,6 +26,8 @@ enum Commands {
     Run(RunCommand),
     /// Compile and store script in the cache without running it.
     Build(BuildCommand),
+    /// Initialize a Java script.
+    Init(InitCommand),
     /// Print parsed JBang directives.
     Info(InfoCommand),
 }
@@ -89,6 +93,28 @@ struct BuildCommand {
 }
 
 #[derive(Parser, Debug)]
+struct InitCommand {
+    /// Init script with the default Java template for now.
+    #[arg(long = "template", short = 't')]
+    template: Option<String>,
+
+    /// Force overwrite of existing files.
+    #[arg(long = "force")]
+    force: bool,
+
+    /// Java version directive to write.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Add dependencies, separated by comma, semicolon, or whitespace.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
+
+    /// Java source file to initialize.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
 struct InfoCommand {
     /// Java source file.
     script: PathBuf,
@@ -115,6 +141,24 @@ fn main() -> Result<()> {
                 javac_options: cmd.javac_options,
                 main_class: cmd.main_class,
                 cache_dir: cmd.cache_dir,
+            })?;
+            0
+        }
+        Some(Commands::Init(cmd)) => {
+            if let Some(template) = &cmd.template {
+                if template != "hello" && template != "java" {
+                    anyhow::bail!("only the default Java init template is supported for now");
+                }
+            }
+            init_script(InitOptions {
+                script: cmd.script,
+                deps: cmd
+                    .deps
+                    .iter()
+                    .flat_map(|dep| split_directive_words(dep))
+                    .collect(),
+                java_version: cmd.java_version,
+                force: cmd.force,
             })?;
             0
         }
