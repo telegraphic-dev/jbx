@@ -1,0 +1,285 @@
+use anyhow::{anyhow, Context, Result};
+use regex::Regex;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Directives {
+    pub deps: Vec<String>,
+    pub repos: Vec<String>,
+    pub sources: Vec<String>,
+    pub files: Vec<String>,
+    pub javac_options: Vec<String>,
+    pub runtime_options: Vec<String>,
+    pub java_version: Option<String>,
+    pub main_class: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunOptions {
+    pub script: PathBuf,
+    pub script_args: Vec<String>,
+    pub extra_deps: Vec<String>,
+    pub classpath: Vec<PathBuf>,
+    pub javac_options: Vec<String>,
+    pub runtime_options: Vec<String>,
+    pub main_class: Option<String>,
+    pub cache_dir: Option<PathBuf>,
+}
+
+pub fn parse_directives(source: &str) -> Directives {
+    let mut directives = Directives::default();
+    let directive_re =
+        Regex::new(r"^(?://)?(?P<key>(?:[A-Z]+:)?[A-Z_]+)(?:\s+(?P<value>.*?))?(?:\s//\s.*)?$")
+            .expect("valid directive regex");
+
+    for raw in source.lines() {
+        let line = raw.trim_start();
+        let Some(stripped) = line.strip_prefix("//") else {
+            continue;
+        };
+        let Some(caps) = directive_re.captures(stripped.trim_start()) else {
+            continue;
+        };
+        let key = caps.name("key").map(|m| m.as_str()).unwrap_or_default();
+        let value = caps
+            .name("value")
+            .map(|m| m.as_str().trim())
+            .unwrap_or_default();
+
+        match key {
+            "DEPS" => directives.deps.extend(split_directive_words(value)),
+            "REPOS" => directives.repos.extend(split_directive_words(value)),
+            "SOURCES" => directives.sources.extend(split_directive_words(value)),
+            "FILES" => directives.files.extend(split_directive_words(value)),
+            "JAVAC_OPTIONS" | "COMPILE_OPTIONS" => {
+                directives.javac_options.extend(split_space_words(value))
+            }
+            "RUNTIME_OPTIONS" | "JAVA_OPTIONS" => {
+                directives.runtime_options.extend(split_space_words(value))
+            }
+            "JAVA" => directives.java_version = Some(value.to_string()),
+            "MAIN" => directives.main_class = Some(value.to_string()),
+            "DESCRIPTION" => {
+                directives.description = Some(match directives.description.take() {
+                    Some(existing) => format!("{existing}\n{value}"),
+                    None => value.to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+    directives
+}
+
+pub fn split_directive_words(text: &str) -> Vec<String> {
+    split_words(text, true)
+}
+
+fn split_space_words(text: &str) -> Vec<String> {
+    split_words(text, false)
+}
+
+fn split_words(text: &str, comma_semicolon_are_separators: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut chars = text.chars().peekable();
+    let mut quote: Option<char> = None;
+
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => cur.push(ch),
+            None if ch == '\'' || ch == '"' => quote = Some(ch),
+            None if ch.is_whitespace()
+                || (comma_semicolon_are_separators && (ch == ',' || ch == ';')) =>
+            {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            None => cur.push(ch),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+pub fn run_java(options: RunOptions) -> Result<i32> {
+    let script = fs::canonicalize(&options.script)
+        .with_context(|| format!("script not found: {}", options.script.display()))?;
+    let source = fs::read_to_string(&script)
+        .with_context(|| format!("failed to read {}", script.display()))?;
+    let mut directives = parse_directives(&source);
+    directives.deps.extend(options.extra_deps);
+    directives.javac_options.extend(options.javac_options);
+    directives.runtime_options.extend(options.runtime_options);
+    if options.main_class.is_some() {
+        directives.main_class = options.main_class;
+    }
+
+    let work_dir = cache_project_dir(options.cache_dir.as_deref(), &script, &source)?;
+    fs::create_dir_all(&work_dir)?;
+    let classes_dir = work_dir.join("classes");
+    if classes_dir.exists() {
+        fs::remove_dir_all(&classes_dir)?;
+    }
+    fs::create_dir_all(&classes_dir)?;
+
+    let base_dir = script.parent().unwrap_or_else(|| Path::new("."));
+    let mut sources = vec![script.clone()];
+    for extra in directives.sources.iter() {
+        sources.push(base_dir.join(extra));
+    }
+
+    let dep_cp = resolve_dependencies(&directives.deps, &directives.repos, &work_dir)?;
+    let mut cp_entries = options.classpath;
+    cp_entries.extend(dep_cp);
+
+    let javac = javac_for(&directives.java_version);
+    let mut javac_cmd = Command::new(&javac);
+    javac_cmd.arg("-d").arg(&classes_dir);
+    if !cp_entries.is_empty() {
+        javac_cmd.arg("-classpath").arg(join_classpath(&cp_entries));
+    }
+    javac_cmd.args(&directives.javac_options);
+    javac_cmd.args(&sources);
+    let status = javac_cmd
+        .status()
+        .with_context(|| format!("failed to execute {javac}"))?;
+    if !status.success() {
+        return Ok(status.code().unwrap_or(1));
+    }
+
+    let main_class = directives
+        .main_class
+        .or_else(|| infer_main_class(&script))
+        .ok_or_else(|| {
+            anyhow!("could not infer main class; add //MAIN fully.qualified.ClassName")
+        })?;
+
+    let java = java_for(&directives.java_version);
+    let mut runtime_cp = vec![classes_dir];
+    runtime_cp.extend(cp_entries);
+    let mut java_cmd = Command::new(&java);
+    java_cmd.args(&directives.runtime_options);
+    java_cmd.arg("-cp").arg(join_classpath(&runtime_cp));
+    java_cmd.arg(main_class);
+    java_cmd.args(options.script_args);
+    let status = java_cmd
+        .status()
+        .with_context(|| format!("failed to execute {java}"))?;
+    Ok(status.code().unwrap_or(1))
+}
+
+fn cache_project_dir(cache_dir: Option<&Path>, script: &Path, source: &str) -> Result<PathBuf> {
+    let root = match cache_dir {
+        Some(path) => path.to_path_buf(),
+        None => dirs::cache_dir()
+            .unwrap_or_else(|| PathBuf::from(".cache"))
+            .join("doj"),
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(script.to_string_lossy().as_bytes());
+    hasher.update(source.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    Ok(root.join(&hash[..16]))
+}
+
+fn resolve_dependencies(
+    deps: &[String],
+    repos: &[String],
+    work_dir: &Path,
+) -> Result<Vec<PathBuf>> {
+    if deps.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(coursier) = find_command(&["cs", "coursier"]) else {
+        return Err(anyhow!(
+            "//DEPS requires Coursier (`cs` or `coursier`) on PATH for now"
+        ));
+    };
+    let cp_file = work_dir.join("classpath.txt");
+    let mut cmd = Command::new(coursier);
+    cmd.arg("fetch").arg("--classpath-file").arg(&cp_file);
+    for repo in repos {
+        cmd.arg("--repository").arg(repo);
+    }
+    cmd.args(deps);
+    let status = cmd.status().context("failed to execute Coursier")?;
+    if !status.success() {
+        return Ok(Vec::new());
+    }
+    let cp = fs::read_to_string(cp_file)?;
+    Ok(split_classpath(&cp))
+}
+
+fn find_command(names: &[&str]) -> Option<String> {
+    for name in names {
+        if Command::new(name).arg("--help").output().is_ok() {
+            return Some((*name).to_string());
+        }
+    }
+    None
+}
+
+fn javac_for(java_version: &Option<String>) -> String {
+    versioned_tool("javac", java_version)
+}
+
+fn java_for(java_version: &Option<String>) -> String {
+    versioned_tool("java", java_version)
+}
+
+fn versioned_tool(tool: &str, java_version: &Option<String>) -> String {
+    if let Some(version) = java_version {
+        let sdkman = PathBuf::from(format!(
+            "{}/.sdkman/candidates/java/current/bin/{tool}",
+            std::env::var("HOME").unwrap_or_default()
+        ));
+        if sdkman.exists() {
+            return sdkman.display().to_string();
+        }
+        let common = [
+            format!("/usr/lib/jvm/java-{version}-openjdk/bin/{tool}"),
+            format!("/usr/lib/jvm/java-{version}-openjdk-amd64/bin/{tool}"),
+            format!("/usr/lib/jvm/java-{version}-openjdk-arm64/bin/{tool}"),
+        ];
+        for candidate in common {
+            if Path::new(&candidate).exists() {
+                return candidate;
+            }
+        }
+    }
+    tool.to_string()
+}
+
+fn infer_main_class(script: &Path) -> Option<String> {
+    script
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+}
+
+fn join_classpath(paths: &[PathBuf]) -> String {
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    paths
+        .iter()
+        .map(|p| p.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
+fn split_classpath(text: &str) -> Vec<PathBuf> {
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    text.trim()
+        .split(sep)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
