@@ -344,7 +344,7 @@ enum AliasSubcommand {
 #[derive(Parser, Debug)]
 struct AliasCatalogOptions {
     /// Use the global user catalog file (~/.jbang/jbang-catalog.json).
-    #[arg(long = "global", short = 'g')]
+    #[arg(long = "global", short = 'g', conflicts_with = "file")]
     global: bool,
 
     /// Path to the catalog file or directory to use.

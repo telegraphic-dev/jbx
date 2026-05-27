@@ -392,7 +392,7 @@ fn ensure_json_object<'a>(
     key: &str,
 ) -> Result<&'a mut serde_json::Map<String, serde_json::Value>> {
     if !value.is_object() {
-        *value = serde_json::json!({});
+        return Err(anyhow!("catalog root is not a JSON object"));
     }
     let root = value.as_object_mut().expect("catalog root is object");
     if !root.get(key).is_some_and(|value| value.is_object()) {
@@ -434,7 +434,10 @@ fn alias_name_from_ref(script_ref: &str) -> Result<String> {
         .next()
         .filter(|part| !part.is_empty())
         .unwrap_or(without_query);
-    let stem = file_name.strip_suffix(".java").unwrap_or(file_name);
+    let stem = ["java", "kt", "groovy", "jsh", "jav"]
+        .iter()
+        .find_map(|ext| file_name.strip_suffix(&format!(".{ext}")))
+        .unwrap_or(file_name);
     if stem.is_empty() {
         Err(anyhow!(
             "could not infer alias name from {script_ref}; pass --name"
