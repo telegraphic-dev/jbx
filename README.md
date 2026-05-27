@@ -19,6 +19,8 @@ Implemented now:
 - `juv app install <script.java>` install a script as a PATH command
 - `juv app uninstall <name>` remove an installed command
 - `juv app list` list installed script commands
+- `juv alias list [--json]` list aliases from the nearest `jbang-catalog.json`
+- `juv run <alias>` / `juv <alias>` run local catalog aliases
 - `juv info classpath <script.java>`
 - `juv info tools <script.java>` with `--select`
 - `juv info docs <script.java>`
@@ -65,6 +67,7 @@ Implemented now:
 - `juv info compile-options`, `runtime-options`, `native-options`, `javaagents`, and `manifest` print advanced directive collections
 - `juv info cache` prints the effective cache directory
 - CLI overrides for `--deps`, `--repo`, `--source`, `--files`, `--java`, `--main`, `--compile-option`, `--java-option`, and `--javaagent`
+- local catalog aliases from `jbang-catalog.json` / `.jbang/jbang-catalog.json`, including `base-ref`, `script-ref`, `arguments`, `dependencies`, `repositories`, `sources`, `files`, classpaths, Java/runtime/compile options, agents, Java version, and main-class metadata
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies
@@ -82,7 +85,7 @@ Implemented now:
 - caches discovered JDKs under `~/.cache/juv/jdks/<major>` via symlinks so future runs do not rescan everything
 - auto-provisions missing JDKs from Adoptium/Eclipse Temurin with SHA-256 archive verification
 
-Not yet implemented: catalogs, templates beyond the default, export, edit integration, native image, and the rest of JBang's lovely edge-case museum.
+Not yet implemented: catalog import/add/remove, templates beyond the default, export, edit integration, native image, and the rest of JBang's lovely edge-case museum.
 
 ## Example
 

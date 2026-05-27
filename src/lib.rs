@@ -102,6 +102,25 @@ pub struct InitOptions {
     pub force: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogAlias {
+    pub name: String,
+    pub script_ref: String,
+    pub script: PathBuf,
+    pub description: Option<String>,
+    pub arguments: Vec<String>,
+    pub deps: Vec<String>,
+    pub repos: Vec<String>,
+    pub sources: Vec<String>,
+    pub files: Vec<String>,
+    pub classpaths: Vec<PathBuf>,
+    pub javac_options: Vec<String>,
+    pub runtime_options: Vec<String>,
+    pub java_agents: Vec<KeyValue>,
+    pub java_version: Option<String>,
+    pub main_class: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CacheEntry {
     pub script: PathBuf,
@@ -164,6 +183,138 @@ pub fn clear_cache(cache_dir: Option<&Path>) -> Result<()> {
             .with_context(|| format!("failed to clear cache {}", root.display()))?;
     }
     Ok(())
+}
+
+pub fn catalog_aliases(start_dir: &Path) -> Result<Vec<CatalogAlias>> {
+    let Some(catalog_path) = find_catalog_file(start_dir) else {
+        return Ok(Vec::new());
+    };
+    read_catalog_aliases(&catalog_path)
+}
+
+pub fn resolve_catalog_alias(name: &str, start_dir: &Path) -> Result<Option<CatalogAlias>> {
+    Ok(catalog_aliases(start_dir)?
+        .into_iter()
+        .find(|alias| alias.name == name))
+}
+
+fn find_catalog_file(start_dir: &Path) -> Option<PathBuf> {
+    let mut current = if start_dir.is_file() {
+        start_dir.parent()?.to_path_buf()
+    } else {
+        start_dir.to_path_buf()
+    };
+    loop {
+        let visible = current.join("jbang-catalog.json");
+        if visible.is_file() {
+            return Some(visible);
+        }
+        let hidden = current.join(".jbang").join("jbang-catalog.json");
+        if hidden.is_file() {
+            return Some(hidden);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn read_catalog_aliases(catalog_path: &Path) -> Result<Vec<CatalogAlias>> {
+    let text = fs::read_to_string(catalog_path)
+        .with_context(|| format!("failed to read catalog {}", catalog_path.display()))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse catalog {}", catalog_path.display()))?;
+    let Some(aliases) = json.get("aliases").and_then(|value| value.as_object()) else {
+        return Ok(Vec::new());
+    };
+    let catalog_dir = catalog_path.parent().unwrap_or_else(|| Path::new("."));
+    let base_ref = json
+        .get("base-ref")
+        .or_else(|| json.get("baseRef"))
+        .and_then(|value| value.as_str());
+    let mut out = Vec::new();
+    for (name, value) in aliases {
+        let Some(script_ref) = value
+            .get("script-ref")
+            .or_else(|| value.get("scriptRef"))
+            .and_then(|value| value.as_str())
+        else {
+            continue;
+        };
+        out.push(CatalogAlias {
+            name: name.to_string(),
+            script_ref: script_ref.to_string(),
+            script: resolve_catalog_script_ref(catalog_dir, base_ref, script_ref),
+            description: value
+                .get("description")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            arguments: json_string_list(value, "arguments"),
+            deps: json_string_list(value, "dependencies"),
+            repos: json_string_list(value, "repositories"),
+            sources: json_string_list(value, "sources"),
+            files: json_string_list(value, "files"),
+            classpaths: json_string_list(value, "classpaths")
+                .into_iter()
+                .map(PathBuf::from)
+                .collect(),
+            javac_options: json_string_list(value, "compile-options"),
+            runtime_options: json_string_list(value, "runtime-options")
+                .into_iter()
+                .chain(json_string_list(value, "java-options"))
+                .collect(),
+            java_agents: json_string_list(value, "java-agents")
+                .into_iter()
+                .map(|agent| KeyValue::parse(&agent))
+                .collect(),
+            java_version: value
+                .get("java")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            main_class: value
+                .get("main")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+fn json_string_list(value: &serde_json::Value, key: &str) -> Vec<String> {
+    match value.get(key) {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect(),
+        Some(serde_json::Value::String(text)) => split_directive_words(text),
+        _ => Vec::new(),
+    }
+}
+
+fn resolve_catalog_script_ref(
+    catalog_dir: &Path,
+    base_ref: Option<&str>,
+    script_ref: &str,
+) -> PathBuf {
+    if is_remote_url(script_ref) || Path::new(script_ref).is_absolute() {
+        return PathBuf::from(script_ref);
+    }
+    let base = match base_ref {
+        Some(base) if is_remote_url(base) => return PathBuf::from(join_url_path(base, script_ref)),
+        Some(base) if Path::new(base).is_absolute() => PathBuf::from(base),
+        Some(base) => catalog_dir.join(base),
+        None => catalog_dir.to_path_buf(),
+    };
+    base.join(script_ref)
+}
+
+fn join_url_path(base: &str, child: &str) -> String {
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        child.trim_start_matches('/')
+    )
 }
 
 pub fn cache_entries(cache_dir: Option<&Path>) -> Result<Vec<CacheEntry>> {
