@@ -10,6 +10,7 @@ use std::process::Command;
 use zip::write::SimpleFileOptions;
 
 pub mod jdk;
+pub mod juvx;
 pub mod resolver;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

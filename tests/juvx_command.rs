@@ -5,8 +5,8 @@ use std::net::TcpListener;
 use std::process::{Command, Output};
 use std::thread;
 
-fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+fn juvx_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juvx"))
 }
 
 fn assert_success(out: &Output) {
@@ -117,8 +117,7 @@ fn juvx_runs_executable_jar_from_gav() {
         ),
     ]));
 
-    let output = juv_command()
-        .arg("juvx")
+    let output = juvx_command()
         .arg("--repo")
         .arg(format!("local={repo}"))
         .arg("--cache-dir")
@@ -136,8 +135,7 @@ fn juvx_runs_executable_jar_from_gav() {
         "juvx alpha,beta"
     );
 
-    let output = juv_command()
-        .arg("juvx")
+    let output = juvx_command()
         .arg("--repo")
         .arg(format!("local={repo}"))
         .arg("--cache-dir")
