@@ -1,12 +1,15 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use juv::{
-    app_bin_dir, app_install, app_list, app_uninstall, build_java, cache_entries, clear_cache,
-    default_cache_dir, init_script, run_java, split_directive_words, trust_add, trust_clear,
-    trust_entries, trust_remove, AppInstallOptions, BuildOptions, InitOptions, KeyValue,
-    RunOptions,
+    app_bin_dir, app_install, app_list, app_uninstall, build_java, cache_entries, catalog_aliases,
+    clear_cache, default_cache_dir, init_script, resolve_catalog_alias, run_java,
+    split_directive_words, trust_add, trust_clear, trust_entries, trust_remove, AppInstallOptions,
+    BuildOptions, InitOptions, KeyValue, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -39,6 +42,8 @@ enum Commands {
     Info(InfoCommand),
     /// Manage scripts installed as commands on PATH.
     App(AppCommand),
+    /// Manage aliases from jbang-catalog.json.
+    Alias(AliasCommand),
     /// Resolve Maven dependencies without running.
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
@@ -315,6 +320,25 @@ struct JdkHomeCommand {
     /// JDK version (defaults to 25).
     #[arg(default_value = "25")]
     version: String,
+}
+
+#[derive(Parser, Debug)]
+struct AliasCommand {
+    #[command(subcommand)]
+    command: AliasSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum AliasSubcommand {
+    /// List aliases from the nearest jbang-catalog.json.
+    List(AliasListCommand),
+}
+
+#[derive(Parser, Debug)]
+struct AliasListCommand {
+    /// Print JSON instead of tab-separated text.
+    #[arg(long = "json")]
+    json: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -659,6 +683,133 @@ fn print_cache_path(cache_dir: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+fn apply_alias_to_run(mut options: RunOptions) -> Result<RunOptions> {
+    if let Some(alias) = alias_for_script(&options.script)? {
+        merge_alias_common(
+            &alias,
+            &mut options.script,
+            &mut options.extra_deps,
+            &mut options.extra_repos,
+            &mut options.extra_sources,
+            &mut options.extra_files,
+            &mut options.classpath,
+            &mut options.javac_options,
+            &mut options.runtime_options,
+            &mut options.java_agents,
+            &mut options.java_version,
+            &mut options.main_class,
+        );
+        options.script_args = prepend(alias.arguments, options.script_args);
+    }
+    Ok(options)
+}
+
+fn apply_alias_to_build(mut options: BuildOptions) -> Result<BuildOptions> {
+    if let Some(alias) = alias_for_script(&options.script)? {
+        merge_alias_common(
+            &alias,
+            &mut options.script,
+            &mut options.extra_deps,
+            &mut options.extra_repos,
+            &mut options.extra_sources,
+            &mut options.extra_files,
+            &mut options.classpath,
+            &mut options.javac_options,
+            &mut options.runtime_options,
+            &mut options.java_agents,
+            &mut options.java_version,
+            &mut options.main_class,
+        );
+    }
+    Ok(options)
+}
+
+fn alias_for_script(script: &Path) -> Result<Option<juv::CatalogAlias>> {
+    let name = script.to_string_lossy().to_string();
+    if script.exists() || name.starts_with("http://") || name.starts_with("https://") {
+        return Ok(None);
+    }
+    resolve_catalog_alias(&name, &std::env::current_dir()?)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merge_alias_common(
+    alias: &juv::CatalogAlias,
+    script: &mut PathBuf,
+    extra_deps: &mut Vec<String>,
+    extra_repos: &mut Vec<String>,
+    extra_sources: &mut Vec<String>,
+    extra_files: &mut Vec<String>,
+    classpath: &mut Vec<PathBuf>,
+    javac_options: &mut Vec<String>,
+    runtime_options: &mut Vec<String>,
+    java_agents: &mut Vec<KeyValue>,
+    java_version: &mut Option<String>,
+    main_class: &mut Option<String>,
+) {
+    *script = alias.script.clone();
+    *extra_deps = prepend(alias.deps.clone(), std::mem::take(extra_deps));
+    *extra_repos = prepend(alias.repos.clone(), std::mem::take(extra_repos));
+    *extra_sources = prepend(alias.sources.clone(), std::mem::take(extra_sources));
+    *extra_files = prepend(alias.files.clone(), std::mem::take(extra_files));
+    *classpath = prepend(alias.classpaths.clone(), std::mem::take(classpath));
+    *javac_options = prepend(alias.javac_options.clone(), std::mem::take(javac_options));
+    *runtime_options = prepend(
+        alias.runtime_options.clone(),
+        std::mem::take(runtime_options),
+    );
+    *java_agents = prepend(alias.java_agents.clone(), std::mem::take(java_agents));
+    if java_version.is_none() {
+        *java_version = alias.java_version.clone();
+    }
+    if main_class.is_none() {
+        *main_class = alias.main_class.clone();
+    }
+}
+
+fn prepend<T>(prefix: Vec<T>, existing: Vec<T>) -> Vec<T> {
+    prefix.into_iter().chain(existing).collect()
+}
+
+fn print_aliases(json: bool) -> Result<()> {
+    let aliases = catalog_aliases(&std::env::current_dir()?)?;
+    if json {
+        let payload = aliases
+            .iter()
+            .map(|alias| {
+                serde_json::json!({
+                    "name": alias.name,
+                    "scriptRef": alias.script_ref,
+                    "script": alias.script.to_string_lossy(),
+                    "description": alias.description,
+                    "arguments": alias.arguments,
+                    "dependencies": alias.deps,
+                    "repositories": alias.repos,
+                    "sources": alias.sources,
+                    "files": alias.files,
+                    "classpaths": alias.classpaths.iter().map(|path| path.to_string_lossy().to_string()).collect::<Vec<_>>(),
+                    "compileOptions": alias.javac_options,
+                    "runtimeOptions": alias.runtime_options,
+                    "javaAgents": key_values_json(&alias.java_agents),
+                    "javaVersion": alias.java_version,
+                    "mainClass": alias.main_class,
+                })
+            })
+            .collect::<Vec<_>>();
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        for alias in aliases {
+            match alias.description {
+                Some(description) => {
+                    println!("{}\t{}\t{}", alias.name, alias.script_ref, description)
+                }
+                None => println!("{}\t{}", alias.name, alias.script_ref),
+            }
+        }
+    }
+    Ok(())
+}
+
 fn tools_payload(script: &std::path::Path, output: &juv::BuildOutput) -> serde_json::Value {
     let directives = &output.directives;
     serde_json::json!({
@@ -692,7 +843,7 @@ fn tools_payload(script: &std::path::Path, output: &juv::BuildOutput) -> serde_j
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let code = match cli.command {
-        Some(Commands::Run(cmd)) => run_java(RunOptions {
+        Some(Commands::Run(cmd)) => run_java(apply_alias_to_run(RunOptions {
             script: cmd.script,
             script_args: cmd.args,
             extra_deps: split_cli_words(&cmd.deps),
@@ -707,9 +858,9 @@ fn main() -> Result<()> {
             main_class: cmd.main_class,
             cache_dir: cmd.cache_dir,
             trust_remote: cmd.trust,
-        })?,
+        })?)?,
         Some(Commands::Build(cmd)) => {
-            build_java(BuildOptions {
+            build_java(apply_alias_to_build(BuildOptions {
                 script: cmd.script,
                 extra_deps: split_cli_words(&cmd.deps),
                 extra_repos: split_cli_words(&cmd.repos),
@@ -723,7 +874,7 @@ fn main() -> Result<()> {
                 main_class: cmd.main_class,
                 cache_dir: cmd.cache_dir,
                 trust_remote: cmd.trust,
-            })?;
+            })?)?;
             0
         }
         Some(Commands::Init(cmd)) => {
@@ -1001,6 +1152,12 @@ fn main() -> Result<()> {
                 0
             }
         },
+        Some(Commands::Alias(cmd)) => match cmd.command {
+            AliasSubcommand::List(cmd) => {
+                print_aliases(cmd.json)?;
+                0
+            }
+        },
         Some(Commands::Resolve(cmd)) => {
             let cache_dir = match cmd.cache_dir {
                 Some(path) => path,
@@ -1097,7 +1254,7 @@ fn main() -> Result<()> {
                 eprintln!("No script specified. Try: juv run Hello.java");
                 std::process::exit(2);
             };
-            run_java(RunOptions {
+            run_java(apply_alias_to_run(RunOptions {
                 script,
                 script_args: cli.args,
                 extra_deps: Vec::new(),
@@ -1112,7 +1269,7 @@ fn main() -> Result<()> {
                 main_class: None,
                 cache_dir: None,
                 trust_remote: false,
-            })?
+            })?)?
         }
     };
     std::process::exit(code);
