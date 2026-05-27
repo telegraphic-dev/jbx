@@ -125,6 +125,35 @@ pub struct CatalogAlias {
     pub main_class: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct AliasAddOptions {
+    pub script_ref: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub arguments: Vec<String>,
+    pub deps: Vec<String>,
+    pub repos: Vec<String>,
+    pub sources: Vec<String>,
+    pub files: Vec<String>,
+    pub classpaths: Vec<PathBuf>,
+    pub javac_options: Vec<String>,
+    pub runtime_options: Vec<String>,
+    pub java_agents: Vec<KeyValue>,
+    pub docs: Vec<KeyValue>,
+    pub java_version: Option<String>,
+    pub main_class: Option<String>,
+    pub force: bool,
+    pub catalog_file: Option<PathBuf>,
+    pub global: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AliasRemoveOptions {
+    pub name: String,
+    pub catalog_file: Option<PathBuf>,
+    pub global: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct CacheEntry {
     pub script: PathBuf,
@@ -202,6 +231,97 @@ pub fn resolve_catalog_alias(name: &str, start_dir: &Path) -> Result<Option<Cata
         .find(|alias| alias.name == name))
 }
 
+pub fn alias_add(options: AliasAddOptions, start_dir: &Path) -> Result<PathBuf> {
+    let name = match options.name {
+        Some(name) => name,
+        None => alias_name_from_ref(&options.script_ref)?,
+    };
+    validate_catalog_entry_name(&name, "alias")?;
+
+    let catalog_path =
+        writable_catalog_file(options.catalog_file.as_deref(), options.global, start_dir)?;
+    let mut catalog = read_catalog_json_for_write(&catalog_path)?;
+    let aliases = ensure_json_object(&mut catalog, "aliases")?;
+    if aliases.contains_key(&name) && !options.force {
+        return Err(anyhow!(
+            "alias '{name}' already exists in {}; use --force to overwrite",
+            catalog_path.display()
+        ));
+    }
+
+    let mut alias = serde_json::Map::new();
+    alias.insert(
+        "script-ref".to_string(),
+        serde_json::Value::String(options.script_ref),
+    );
+    insert_optional_string(&mut alias, "description", options.description);
+    insert_string_list(&mut alias, "arguments", options.arguments);
+    insert_string_list(&mut alias, "dependencies", options.deps);
+    insert_string_list(&mut alias, "repositories", options.repos);
+    insert_string_list(&mut alias, "sources", options.sources);
+    insert_string_list(&mut alias, "files", options.files);
+    insert_string_list(
+        &mut alias,
+        "classpaths",
+        options
+            .classpaths
+            .into_iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect(),
+    );
+    insert_string_list(&mut alias, "compile-options", options.javac_options);
+    insert_string_list(&mut alias, "runtime-options", options.runtime_options);
+    insert_string_list(
+        &mut alias,
+        "java-agents",
+        options
+            .java_agents
+            .into_iter()
+            .map(|kv| match kv.value {
+                Some(value) => format!("{}={value}", kv.key),
+                None => kv.key,
+            })
+            .collect(),
+    );
+    insert_string_list(
+        &mut alias,
+        "docs",
+        options
+            .docs
+            .into_iter()
+            .map(|kv| match kv.value {
+                Some(value) => format!("{}={value}", kv.key),
+                None => kv.key,
+            })
+            .collect(),
+    );
+    insert_optional_string(&mut alias, "java", options.java_version);
+    insert_optional_string(&mut alias, "main", options.main_class);
+
+    aliases.insert(name, serde_json::Value::Object(alias));
+    write_catalog_json(&catalog_path, &catalog)?;
+    Ok(catalog_path)
+}
+
+pub fn alias_remove(options: AliasRemoveOptions, start_dir: &Path) -> Result<bool> {
+    validate_catalog_entry_name(&options.name, "alias")?;
+    let catalog_path =
+        writable_catalog_file(options.catalog_file.as_deref(), options.global, start_dir)?;
+    if !catalog_path.is_file() {
+        return Ok(false);
+    }
+    let mut catalog = read_catalog_json_for_write(&catalog_path)?;
+    let removed = catalog
+        .get_mut("aliases")
+        .and_then(|value| value.as_object_mut())
+        .and_then(|aliases| aliases.remove(&options.name))
+        .is_some();
+    if removed {
+        write_catalog_json(&catalog_path, &catalog)?;
+    }
+    Ok(removed)
+}
+
 fn find_catalog_file(start_dir: &Path) -> Option<PathBuf> {
     let mut current = if start_dir.is_file() {
         start_dir.parent()?.to_path_buf()
@@ -221,6 +341,125 @@ fn find_catalog_file(start_dir: &Path) -> Option<PathBuf> {
             return None;
         }
     }
+}
+
+fn writable_catalog_file(
+    catalog_file: Option<&Path>,
+    global: bool,
+    start_dir: &Path,
+) -> Result<PathBuf> {
+    if global {
+        return Ok(dirs::home_dir()
+            .ok_or_else(|| anyhow!("could not determine home directory"))?
+            .join(".jbang")
+            .join("jbang-catalog.json"));
+    }
+    if let Some(path) = catalog_file {
+        if path.is_dir() {
+            let visible = path.join("jbang-catalog.json");
+            let hidden = path.join(".jbang").join("jbang-catalog.json");
+            if !visible.exists() && hidden.exists() {
+                return Ok(hidden);
+            }
+            return Ok(visible);
+        }
+        return Ok(path.to_path_buf());
+    }
+    Ok(find_catalog_file(start_dir).unwrap_or_else(|| start_dir.join("jbang-catalog.json")))
+}
+
+fn read_catalog_json_for_write(path: &Path) -> Result<serde_json::Value> {
+    if path.exists() {
+        let text = fs::read_to_string(path)
+            .with_context(|| format!("failed to read catalog {}", path.display()))?;
+        serde_json::from_str(&text)
+            .with_context(|| format!("failed to parse catalog {}", path.display()))
+    } else {
+        Ok(serde_json::json!({}))
+    }
+}
+
+fn write_catalog_json(path: &Path, value: &serde_json::Value) -> Result<()> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, format!("{}\n", serde_json::to_string_pretty(value)?))
+        .with_context(|| format!("failed to write catalog {}", path.display()))
+}
+
+fn ensure_json_object<'a>(
+    value: &'a mut serde_json::Value,
+    key: &str,
+) -> Result<&'a mut serde_json::Map<String, serde_json::Value>> {
+    if !value.is_object() {
+        return Err(anyhow!("catalog root is not a JSON object"));
+    }
+    let root = value.as_object_mut().expect("catalog root is object");
+    if !root.get(key).is_some_and(|value| value.is_object()) {
+        root.insert(key.to_string(), serde_json::json!({}));
+    }
+    Ok(root
+        .get_mut(key)
+        .and_then(|value| value.as_object_mut())
+        .expect("catalog section is object"))
+}
+
+fn insert_optional_string(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    if let Some(value) = value.filter(|value| !value.is_empty()) {
+        map.insert(key.to_string(), serde_json::Value::String(value));
+    }
+}
+
+fn insert_string_list(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    values: Vec<String>,
+) {
+    if !values.is_empty() {
+        map.insert(
+            key.to_string(),
+            serde_json::Value::Array(values.into_iter().map(serde_json::Value::String).collect()),
+        );
+    }
+}
+
+fn alias_name_from_ref(script_ref: &str) -> Result<String> {
+    let without_query = script_ref.split(['?', '#']).next().unwrap_or(script_ref);
+    let file_name = without_query
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|part| !part.is_empty())
+        .unwrap_or(without_query);
+    let stem = ["java", "kt", "groovy", "jsh", "jav"]
+        .iter()
+        .find_map(|ext| file_name.strip_suffix(&format!(".{ext}")))
+        .unwrap_or(file_name);
+    if stem.is_empty() {
+        Err(anyhow!(
+            "could not infer alias name from {script_ref}; pass --name"
+        ))
+    } else {
+        Ok(stem.to_string())
+    }
+}
+
+fn validate_catalog_entry_name(name: &str, kind: &str) -> Result<()> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(anyhow!("{kind} name must not be empty"));
+    };
+    if !first.is_ascii_alphabetic()
+        || !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err(anyhow!(
+            "invalid {kind} name '{name}'; use a letter followed by letters, digits, underscores or hyphens"
+        ));
+    }
+    Ok(())
 }
 
 fn read_catalog_aliases(catalog_path: &Path) -> Result<Vec<CatalogAlias>> {
