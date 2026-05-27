@@ -297,11 +297,27 @@ pub fn detect_jdk_major_version(jdk_root: &Path) -> Option<u32> {
             .output()
         {
             let text = String::from_utf8_lossy(&output.stderr);
-            return parse_major_from_version_string(&text);
+            return parse_major_from_java_version_output(&text);
         }
     }
 
     None
+}
+
+/// Parse the major version from `java -version` output.
+///
+/// JVMs may prefix stderr with environment notices such as
+/// `Picked up JAVA_TOOL_OPTIONS: -Xmx4g`, so only parse the quoted token on the
+/// actual `... version "..."` line.
+fn parse_major_from_java_version_output(output: &str) -> Option<u32> {
+    output.lines().find_map(|line| {
+        if !line.contains("version \"") {
+            return None;
+        }
+        let start = line.find('"')? + 1;
+        let end = line[start..].find('"')? + start;
+        parse_major_from_version_string(&line[start..end])
+    })
 }
 
 /// Parse the major version from a version string like "21.0.3", "1.8.0_432", "17.0.11+10".
@@ -719,6 +735,12 @@ mod tests {
         assert_eq!(parse_major_from_version_string("1.8.0_432"), Some(8));
         assert_eq!(parse_major_from_version_string("17.0.11+10"), Some(17));
         assert_eq!(parse_major_from_version_string("25"), Some(25));
+    }
+
+    #[test]
+    fn test_parse_major_from_java_version_output_ignores_tool_options() {
+        let output = "Picked up JAVA_TOOL_OPTIONS: -Xmx4g\nopenjdk version \"21.0.3\" 2024-04-16\nOpenJDK Runtime Environment\n";
+        assert_eq!(parse_major_from_java_version_output(output), Some(21));
     }
 
     #[test]
