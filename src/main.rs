@@ -1,8 +1,9 @@
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
 };
 
 use juv::{
@@ -56,6 +57,8 @@ enum Commands {
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
     Fetch(FetchCommand),
+    /// Run an executable JAR resolved from Maven coordinates.
+    Juvx(JuvxCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
 }
@@ -720,6 +723,28 @@ struct FetchCommand {
 }
 
 #[derive(Parser, Debug)]
+struct JuvxCommand {
+    /// Maven coordinate to resolve and run (groupId:artifactId[:classifier]:version).
+    coordinate: String,
+
+    /// Additional repository (id=url format or bare URL).
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Override dependency cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Main class to launch with the resolved classpath instead of java -jar.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Arguments passed to the launched Java tool.
+    #[arg(trailing_var_arg = true)]
+    args: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
 struct CacheClearCommand {
     /// Override cache directory.
     #[arg(long = "cache-dir")]
@@ -1292,6 +1317,69 @@ fn tools_payload(script: &std::path::Path, output: &juv::BuildOutput) -> serde_j
     })
 }
 
+fn maven_repositories(repo_args: &[String]) -> Vec<juv::resolver::Repository> {
+    let mut repos = vec![juv::resolver::Repository::central()];
+    for repo in repo_args {
+        if repo == "central" || repo == "mavenCentral" {
+            continue;
+        }
+        if let Some((id, url)) = repo.split_once('=') {
+            repos.push(juv::resolver::Repository {
+                id: id.to_string(),
+                url: url.to_string(),
+            });
+        } else {
+            repos.push(juv::resolver::Repository {
+                id: repo.clone(),
+                url: repo.clone(),
+            });
+        }
+    }
+    repos
+}
+
+fn primary_jar_name(coordinate: &str) -> Result<String> {
+    let dep = juv::resolver::parse_coordinate(coordinate)?;
+    Ok(match dep.classifier {
+        Some(classifier) => format!("{}-{}-{classifier}.jar", dep.module.name, dep.version),
+        None => format!("{}-{}.jar", dep.module.name, dep.version),
+    })
+}
+
+fn run_juvx(cmd: JuvxCommand) -> Result<i32> {
+    let cache_dir = match cmd.cache_dir {
+        Some(path) => path,
+        None => default_cache_dir()?.join("deps"),
+    };
+    let repos = maven_repositories(&cmd.repos);
+    let coordinate = cmd.coordinate;
+    let coordinates = vec![coordinate.clone()];
+    let classpath = juv::resolver::resolve_classpath(&coordinates, &repos, &cache_dir)?;
+    if classpath.is_empty() {
+        return Err(anyhow!("no JARs resolved for {coordinate}"));
+    }
+
+    let mut java = ProcessCommand::new("java");
+    if let Some(main_class) = cmd.main_class {
+        java.arg("-cp")
+            .arg(std::env::join_paths(&classpath)?)
+            .arg(main_class);
+    } else {
+        let jar_name = primary_jar_name(&coordinate)?;
+        let primary_jar = classpath
+            .iter()
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name == jar_name.as_str())
+            })
+            .ok_or_else(|| anyhow!("resolved classpath did not contain primary JAR {jar_name}"))?;
+        java.arg("-jar").arg(primary_jar);
+    }
+    java.args(cmd.args);
+    let status = java.status().context("failed to launch java")?;
+    Ok(status.code().unwrap_or(1))
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let code = match cli.command {
@@ -1723,23 +1811,7 @@ fn main() -> Result<()> {
                 Some(path) => path,
                 None => default_cache_dir()?.join("deps"),
             };
-            let mut repos = vec![juv::resolver::Repository::central()];
-            for repo in &cmd.repos {
-                if repo == "central" || repo == "mavenCentral" {
-                    continue; // already included
-                }
-                if let Some((id, url)) = repo.split_once('=') {
-                    repos.push(juv::resolver::Repository {
-                        id: id.to_string(),
-                        url: url.to_string(),
-                    });
-                } else {
-                    repos.push(juv::resolver::Repository {
-                        id: repo.clone(),
-                        url: repo.clone(),
-                    });
-                }
-            }
+            let repos = maven_repositories(&cmd.repos);
             if cmd.classpath {
                 let paths = juv::resolver::resolve_classpath(&cmd.coordinates, &repos, &cache_dir)?;
                 println!("{}", std::env::join_paths(paths)?.to_string_lossy());
@@ -1756,23 +1828,7 @@ fn main() -> Result<()> {
                 Some(path) => path,
                 None => default_cache_dir()?.join("deps"),
             };
-            let mut repos = vec![juv::resolver::Repository::central()];
-            for repo in &cmd.repos {
-                if repo == "central" || repo == "mavenCentral" {
-                    continue; // already included
-                }
-                if let Some((id, url)) = repo.split_once('=') {
-                    repos.push(juv::resolver::Repository {
-                        id: id.to_string(),
-                        url: url.to_string(),
-                    });
-                } else {
-                    repos.push(juv::resolver::Repository {
-                        id: repo.clone(),
-                        url: repo.clone(),
-                    });
-                }
-            }
+            let repos = maven_repositories(&cmd.repos);
             if cmd.deps_only {
                 let artifacts = juv::resolver::resolve(&cmd.coordinates, &repos, &cache_dir)?;
                 for artifact in &artifacts {
@@ -1784,6 +1840,7 @@ fn main() -> Result<()> {
             }
             0
         }
+        Some(Commands::Juvx(cmd)) => run_juvx(cmd)?,
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
                 let jdks = juv::jdk::list_jdks()?;
