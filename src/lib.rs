@@ -347,7 +347,9 @@ pub fn trust_entries(cache_dir: Option<&Path>) -> Result<Vec<(String, String)>> 
 pub fn trust_add(url: &str, cache_dir: Option<&Path>) -> Result<String> {
     ensure_remote_url(url)?;
     let source = fetch_remote_script(url)?;
-    let hash = sha256_hex(&source);
+    let directives = parse_directives(&source);
+    let resources = collect_remote_relative_resources(&directives, url)?;
+    let hash = trusted_remote_hash(&source, &resources);
     write_trust_entry(url, &hash, cache_dir)?;
     Ok(hash)
 }
@@ -372,7 +374,6 @@ pub fn trust_clear(cache_dir: Option<&Path>) -> Result<()> {
 struct MaterializedScript {
     path: PathBuf,
     source: String,
-    remote_url: Option<String>,
 }
 
 fn materialize_script(
@@ -383,7 +384,9 @@ fn materialize_script(
     let script_text = script.to_string_lossy();
     if is_remote_url(&script_text) {
         let source = fetch_remote_script(&script_text)?;
-        let hash = sha256_hex(&source);
+        let directives = parse_directives(&source);
+        let resources = collect_remote_relative_resources(&directives, &script_text)?;
+        let hash = trusted_remote_hash(&source, &resources);
         if trust_remote {
             write_trust_entry(&script_text, &hash, cache_dir)?;
         } else if !is_trusted_remote(&script_text, &hash, cache_dir)? {
@@ -403,22 +406,15 @@ fn materialize_script(
         fs::create_dir_all(&remote_dir)?;
         let path = remote_dir.join(file_name);
         fs::write(&path, &source)?;
-        return Ok(MaterializedScript {
-            path,
-            source,
-            remote_url: Some(script_text.to_string()),
-        });
+        materialize_remote_relative_resources(&resources, &remote_dir)?;
+        return Ok(MaterializedScript { path, source });
     }
 
     let path = fs::canonicalize(script)
         .with_context(|| format!("script not found: {}", script.display()))?;
     let source =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    Ok(MaterializedScript {
-        path,
-        source,
-        remote_url: None,
-    })
+    Ok(MaterializedScript { path, source })
 }
 
 fn is_remote_url(text: &str) -> bool {
@@ -445,11 +441,18 @@ fn fetch_remote_script(url: &str) -> Result<String> {
         .map_err(|err| anyhow!("failed to read response from {url}: {err}"))
 }
 
-fn materialize_remote_relative_resources(
+#[derive(Debug)]
+struct RemoteRelativeResource {
+    resource_ref: String,
+    url: String,
+    body: String,
+}
+
+fn collect_remote_relative_resources(
     directives: &Directives,
     remote_url: &str,
-    remote_dir: &Path,
-) -> Result<()> {
+) -> Result<Vec<RemoteRelativeResource>> {
+    let mut resources = Vec::new();
     let source_refs = directives.sources.iter().chain(
         directives
             .deps
@@ -457,7 +460,7 @@ fn materialize_remote_relative_resources(
             .filter(|dep| !looks_like_binary_dependency(dep)),
     );
     for source_ref in source_refs {
-        materialize_remote_relative_ref(remote_url, remote_dir, source_ref)?;
+        collect_remote_relative_ref(remote_url, source_ref, &mut resources)?;
     }
 
     for file_ref in &directives.files {
@@ -465,47 +468,85 @@ fn materialize_remote_relative_resources(
         let source_ref = source
             .to_str()
             .ok_or_else(|| anyhow!("invalid non-UTF-8 //FILES resource: {file_ref}"))?;
-        materialize_remote_relative_ref(remote_url, remote_dir, source_ref)?;
+        collect_remote_relative_ref(remote_url, source_ref, &mut resources)?;
     }
 
-    Ok(())
+    resources.sort_by(|a, b| a.resource_ref.cmp(&b.resource_ref).then(a.url.cmp(&b.url)));
+    Ok(resources)
 }
 
-fn materialize_remote_relative_ref(
+fn collect_remote_relative_ref(
     remote_url: &str,
-    remote_dir: &Path,
     resource_ref: &str,
+    resources: &mut Vec<RemoteRelativeResource>,
 ) -> Result<()> {
     if resource_ref.is_empty() || looks_like_binary_dependency(resource_ref) {
         return Ok(());
     }
-    if Path::new(resource_ref).is_absolute() || resource_ref.contains('\\') {
+    validate_remote_relative_ref(resource_ref)?;
+    let url = resolve_remote_resource_url(remote_url, resource_ref)?;
+    let body = fetch_remote_script(&url)?;
+    resources.push(RemoteRelativeResource {
+        resource_ref: resource_ref.to_string(),
+        url,
+        body,
+    });
+    Ok(())
+}
+
+fn materialize_remote_relative_resources(
+    resources: &[RemoteRelativeResource],
+    remote_dir: &Path,
+) -> Result<()> {
+    for resource in resources {
+        let local_path = remote_dir.join(&resource.resource_ref);
+        if let Some(parent) = local_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&local_path, &resource.body).with_context(|| {
+            format!(
+                "failed to cache remote resource {} at {}",
+                resource.url,
+                local_path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_remote_relative_ref(resource_ref: &str) -> Result<()> {
+    if Path::new(resource_ref).is_absolute()
+        || resource_ref.starts_with('/')
+        || resource_ref.contains('\\')
+    {
         return Err(anyhow!(
             "only relative URL paths are supported for remote resources: {resource_ref}"
         ));
     }
     if resource_ref
         .split('/')
-        .any(|part| part == ".." || part.is_empty() && resource_ref != "/")
+        .any(|part| part == ".." || part.is_empty())
     {
         return Err(anyhow!(
             "remote resource paths must not contain empty or parent segments: {resource_ref}"
         ));
     }
-
-    let url = resolve_remote_resource_url(remote_url, resource_ref)?;
-    let body = fetch_remote_script(&url)?;
-    let local_path = remote_dir.join(resource_ref);
-    if let Some(parent) = local_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&local_path, body).with_context(|| {
-        format!(
-            "failed to cache remote resource {url} at {}",
-            local_path.display()
-        )
-    })?;
     Ok(())
+}
+
+fn trusted_remote_hash(source: &str, resources: &[RemoteRelativeResource]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"juv-remote-v2\nmain\0");
+    hasher.update(source.as_bytes());
+    for resource in resources {
+        hasher.update(b"\nresource\0");
+        hasher.update(resource.resource_ref.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(resource.url.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(resource.body.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 fn resolve_remote_resource_url(remote_url: &str, resource_ref: &str) -> Result<String> {
@@ -590,12 +631,6 @@ fn remote_file_name(url: &str) -> String {
     }
 }
 
-fn sha256_hex(text: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(text.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
 pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     let materialized = materialize_script(
         &options.script,
@@ -604,7 +639,6 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     )?;
     let script = materialized.path;
     let source = materialized.source;
-    let remote_url = materialized.remote_url;
     let mut directives = parse_directives(&source);
     directives.deps.extend(options.extra_deps);
     directives.repos.extend(options.extra_repos);
@@ -618,11 +652,6 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     }
     if options.main_class.is_some() {
         directives.main_class = options.main_class;
-    }
-
-    if let Some(remote_url) = remote_url.as_deref() {
-        let remote_dir = script.parent().unwrap_or_else(|| Path::new("."));
-        materialize_remote_relative_resources(&directives, remote_url, remote_dir)?;
     }
 
     let work_dir = cache_project_dir(options.cache_dir.as_deref(), &script, &source)?;

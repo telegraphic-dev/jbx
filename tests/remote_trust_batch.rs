@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::process::{Command, Output};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 fn juv_command() -> Command {
@@ -67,6 +68,49 @@ fn serve_files(files: HashMap<&'static str, &'static str>, requests: usize) -> S
                 .unwrap_or("/");
             let (status, body) = match files.get(path) {
                 Some(body) => ("200 OK", *body),
+                None => ("404 Not Found", "not found"),
+            };
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+    });
+    base
+}
+
+fn serve_file_sequences(
+    files: HashMap<&'static str, Vec<&'static str>>,
+    requests: usize,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let files = Arc::new(Mutex::new(
+        files
+            .into_iter()
+            .map(|(path, bodies)| (path, VecDeque::from(bodies)))
+            .collect::<HashMap<_, _>>(),
+    ));
+    thread::spawn(move || {
+        for _ in 0..requests {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let read = stream.read(&mut request).unwrap_or(0);
+            let request_text = String::from_utf8_lossy(&request[..read]);
+            let path = request_text
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("/");
+            let body = files
+                .lock()
+                .unwrap()
+                .get_mut(path)
+                .and_then(|bodies| bodies.pop_front());
+            let (status, body) = match body {
+                Some(body) => ("200 OK", body),
                 None => ("404 Not Found", "not found"),
             };
             let response = format!(
@@ -273,6 +317,71 @@ class RemoteDepMain {
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).trim(),
         "remote-source-dep-ok"
+    );
+}
+
+#[test]
+fn trusted_remote_relative_source_change_blocks_execution() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let base = serve_file_sequences(
+        HashMap::from([
+            (
+                "/secure/Main.java",
+                vec![
+                    r#"//SOURCES Helper.java
+class Main {
+  public static void main(String[] args) { System.out.print(Helper.message()); }
+}
+"#,
+                    r#"//SOURCES Helper.java
+class Main {
+  public static void main(String[] args) { System.out.print(Helper.message()); }
+}
+"#,
+                ],
+            ),
+            (
+                "/secure/Helper.java",
+                vec![
+                    r#"class Helper {
+  static String message() { return "trusted-helper"; }
+}
+"#,
+                    r#"class Helper {
+  static String message() { return "changed-helper"; }
+}
+"#,
+                ],
+            ),
+        ]),
+        4,
+    );
+    let url = format!("{base}/secure/Main.java");
+
+    let trusted = juv_command()
+        .arg("trust")
+        .arg("add")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&url)
+        .output()
+        .unwrap();
+    assert_success(&trusted);
+
+    let out = juv_command()
+        .arg("run")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&url)
+        .output()
+        .unwrap();
+
+    assert_failure(&out);
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("not trusted"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 
