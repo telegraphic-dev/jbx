@@ -47,3 +47,9 @@ fn splits_like_jbang_spaces_semicolons_commas_tabs_with_quotes() {
         vec!["a:b:1", "c:d:2", "quoted value", "single value"]
     );
 }
+
+#[test]
+fn ignores_comment_lines_that_look_like_disabled_directives() {
+    let directives = parse_directives("// //DEPS <dependency1> <dependency2>\n//DEPS real:dep:1\n");
+    assert_eq!(directives.deps, vec!["real:dep:1"]);
+}

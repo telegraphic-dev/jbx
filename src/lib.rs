@@ -103,6 +103,7 @@ pub struct InitOptions {
     pub script: PathBuf,
     pub deps: Vec<String>,
     pub java_version: Option<String>,
+    pub template: Option<String>,
     pub force: bool,
 }
 
@@ -169,6 +170,7 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
         ));
     }
 
+    let template = init_template(options.template.as_deref())?;
     let base_name = options
         .script
         .file_stem()
@@ -195,9 +197,60 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
 
     fs::write(
         &options.script,
-        render_default_init_script(base_name, &options),
+        render_init_script(template, base_name, &options),
     )?;
     Ok(options.script)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitTemplate {
+    pub name: &'static str,
+    pub description: &'static str,
+}
+
+pub const INIT_TEMPLATES: &[InitTemplate] = &[
+    InitTemplate {
+        name: "hello",
+        description: "Basic Java Hello World script",
+    },
+    InitTemplate {
+        name: "java",
+        description: "Alias for hello",
+    },
+    InitTemplate {
+        name: "compact",
+        description: "Java 25 compact-source Hello World script",
+    },
+    InitTemplate {
+        name: "cli",
+        description: "Picocli command-line application",
+    },
+    InitTemplate {
+        name: "agent",
+        description: "Java agent skeleton",
+    },
+];
+
+pub fn init_templates() -> &'static [InitTemplate] {
+    INIT_TEMPLATES
+}
+
+fn init_template(template: Option<&str>) -> Result<InitTemplate> {
+    let name = template.unwrap_or("hello");
+    INIT_TEMPLATES
+        .iter()
+        .copied()
+        .find(|template| template.name == name)
+        .ok_or_else(|| {
+            anyhow!(
+                "unknown init template '{name}'; supported templates: {}",
+                INIT_TEMPLATES
+                    .iter()
+                    .map(|template| template.name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
 }
 
 pub fn default_cache_dir() -> Result<PathBuf> {
@@ -598,20 +651,135 @@ pub fn cache_entries(cache_dir: Option<&Path>) -> Result<Vec<CacheEntry>> {
     Ok(entries)
 }
 
-fn render_default_init_script(base_name: &str, options: &InitOptions) -> String {
-    let mut out = String::from("///usr/bin/env jbang \"$0\" \"$@\" ; exit $?\n");
-    if let Some(version) = &options.java_version {
+fn render_init_script(template: InitTemplate, base_name: &str, options: &InitOptions) -> String {
+    match template.name {
+        "compact" => render_compact_init_script(options),
+        "cli" => render_cli_init_script(base_name, options),
+        "agent" => render_agent_init_script(base_name, options),
+        "hello" | "java" => render_hello_init_script(base_name, options),
+        _ => unreachable!("template was validated"),
+    }
+}
+
+fn render_header(options: &InitOptions, default_java: Option<&str>, out: &mut String) {
+    out.push_str("///usr/bin/env jbang \"$0\" \"$@\" ; exit $?\n");
+    if let Some(version) = options.java_version.as_deref().or(default_java) {
         out.push_str(&format!("//JAVA {version}\n"));
     }
     for dep in &options.deps {
         out.push_str(&format!("//DEPS {dep}\n"));
     }
+}
+
+fn render_dependency_hint(options: &InitOptions, out: &mut String) {
     if options.deps.is_empty() {
         out.push_str("// //DEPS <dependency1> <dependency2>\n");
     }
+}
+
+fn render_hello_init_script(base_name: &str, options: &InitOptions) -> String {
+    let mut out = String::new();
+    render_header(options, None, &mut out);
+    render_dependency_hint(options, &mut out);
     out.push_str("import static java.lang.System.*;\n\n");
     out.push_str(&format!(
         "public class {base_name} {{\n\n    public static void main(String... args) {{\n        out.println(\"Hello World\");\n    }}\n}}\n"
+    ));
+    out
+}
+
+fn render_compact_init_script(options: &InitOptions) -> String {
+    let mut out = String::new();
+    render_header(options, Some("25+"), &mut out);
+    render_dependency_hint(options, &mut out);
+    out.push_str("void main(String... args) {\n    IO.println(\"Hello World\");\n}\n");
+    out
+}
+
+fn render_cli_init_script(base_name: &str, options: &InitOptions) -> String {
+    let mut out = String::new();
+    render_header(options, None, &mut out);
+    out.push_str("//DEPS info.picocli:picocli:4.7.6\n");
+    render_dependency_hint(options, &mut out);
+    out.push_str(&format!(
+        r#"
+import picocli.CommandLine;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Parameters;
+
+import java.util.concurrent.Callable;
+
+@Command(name = "{base_name}", mixinStandardHelpOptions = true, version = "{base_name} 0.1",
+        description = "{base_name} made with juv")
+class {base_name} implements Callable<Integer> {{
+
+    @Parameters(index = "0", description = "The greeting to print", defaultValue = "World!")
+    private String greeting;
+
+    public static void main(String... args) {{
+        int exitCode = new CommandLine(new {base_name}()).execute(args);
+        System.exit(exitCode);
+    }}
+
+    @Override
+    public Integer call() {{
+        System.out.println("Hello " + greeting);
+        return 0;
+    }}
+}}
+"#
+    ));
+    out
+}
+
+fn render_agent_init_script(base_name: &str, options: &InitOptions) -> String {
+    let mut out = String::new();
+    render_header(options, None, &mut out);
+    render_dependency_hint(options, &mut out);
+    out.push_str(
+        "//JAVAAGENT Can-Redefine-Classes Can-Retransform-Classes Can-Set-Native-Method-Prefix\n\n",
+    );
+    out.push_str(&format!(
+        r#"import java.lang.instrument.ClassFileTransformer;
+import java.lang.instrument.IllegalClassFormatException;
+import java.lang.instrument.Instrumentation;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.ProtectionDomain;
+
+public class {base_name} {{
+
+    public static void premain(String agentArgs, Instrumentation instrumentation) {{
+        System.out.println("juv agent {base_name} loaded. Will dump all loaded classes into `classes/`");
+        instrumentation.addTransformer(new ClassLogger());
+    }}
+
+    public static void main(String[] args) {{
+        System.out.println("This is a juv javaagent.\n" +
+                           "Usage: \n" +
+                           "   juv run --javaagent={base_name}.java yourApp.java");
+    }}
+
+    public static class ClassLogger implements ClassFileTransformer {{
+        @Override
+        public byte[] transform(ClassLoader loader,
+                                String className,
+                                Class<?> classBeingRedefined,
+                                ProtectionDomain protectionDomain,
+                                byte[] classfileBuffer) throws IllegalClassFormatException {{
+            try {{
+                Path path = Paths.get("classes/" + className + ".class");
+                Files.createDirectories(path.getParent());
+                Files.write(path, classfileBuffer);
+            }} catch (Throwable ignored) {{
+                System.err.println(ignored);
+            }}
+            return classfileBuffer;
+        }}
+    }}
+}}
+"#
     ));
     out
 }
@@ -636,7 +804,11 @@ pub fn parse_directives(source: &str) -> Directives {
         let Some(stripped) = line.strip_prefix("//") else {
             continue;
         };
-        let Some(caps) = directive_re.captures(stripped.trim_start()) else {
+        let stripped = stripped.trim_start();
+        if stripped.starts_with("//") {
+            continue;
+        }
+        let Some(caps) = directive_re.captures(stripped) else {
             continue;
         };
         let key = caps.name("key").map(|m| m.as_str()).unwrap_or_default();
