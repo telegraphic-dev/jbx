@@ -739,8 +739,8 @@ struct JuvxCommand {
     #[arg(long = "main")]
     main_class: Option<String>,
 
-    /// Arguments passed to the launched Java tool.
-    #[arg(trailing_var_arg = true)]
+    /// Arguments passed to the launched Java tool after `--`.
+    #[arg(last = true)]
     args: Vec<String>,
 }
 
@@ -1377,6 +1377,13 @@ fn run_juvx(cmd: JuvxCommand) -> Result<i32> {
     }
     java.args(cmd.args);
     let status = java.status().context("failed to launch java")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return Ok(128 + signal);
+        }
+    }
     Ok(status.code().unwrap_or(1))
 }
 

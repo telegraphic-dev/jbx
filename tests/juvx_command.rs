@@ -64,31 +64,31 @@ public class Tool {
     fs::read(jar_path).unwrap()
 }
 
-fn serve_files(files: HashMap<&'static str, Vec<u8>>, requests: usize) -> String {
+fn serve_files(files: HashMap<&'static str, Vec<u8>>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    thread::spawn(move || {
-        for _ in 0..requests {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 2048];
-            let read = stream.read(&mut request).unwrap_or(0);
-            let request_text = String::from_utf8_lossy(&request[..read]);
-            let path = request_text
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().nth(1))
-                .unwrap_or("/");
-            let (status, body): (&str, &[u8]) = match files.get(path) {
-                Some(body) => ("200 OK", body.as_slice()),
-                None => ("404 Not Found", b"not found"),
-            };
-            let response = format!(
+    thread::spawn(move || loop {
+        let Ok((mut stream, _)) = listener.accept() else {
+            break;
+        };
+        let mut request = [0_u8; 2048];
+        let read = stream.read(&mut request).unwrap_or(0);
+        let request_text = String::from_utf8_lossy(&request[..read]);
+        let path = request_text
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("/");
+        let (status, body): (&str, &[u8]) = match files.get(path) {
+            Some(body) => ("200 OK", body.as_slice()),
+            None => ("404 Not Found", b"not found"),
+        };
+        let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             );
-            stream.write_all(response.as_bytes()).unwrap();
-            stream.write_all(body).unwrap();
-        }
+        stream.write_all(response.as_bytes()).unwrap();
+        stream.write_all(body).unwrap();
     });
     base
 }
@@ -106,19 +106,16 @@ fn juvx_runs_executable_jar_from_gav() {
 </project>
 "#
     .to_vec();
-    let repo = serve_files(
-        HashMap::from([
-            (
-                "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.pom",
-                pom,
-            ),
-            (
-                "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.jar",
-                jar,
-            ),
-        ]),
-        2,
-    );
+    let repo = serve_files(HashMap::from([
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.pom",
+            pom,
+        ),
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.jar",
+            jar,
+        ),
+    ]));
 
     let output = juv_command()
         .arg("juvx")
@@ -127,6 +124,7 @@ fn juvx_runs_executable_jar_from_gav() {
         .arg("--cache-dir")
         .arg(tmp.path().join("cache"))
         .arg("dev.telegraphic:hello-tool:1.0.0")
+        .arg("--")
         .arg("alpha")
         .arg("beta")
         .output()
@@ -137,4 +135,21 @@ fn juvx_runs_executable_jar_from_gav() {
         String::from_utf8_lossy(&output.stdout).trim(),
         "juvx alpha,beta"
     );
+
+    let output = juv_command()
+        .arg("juvx")
+        .arg("--repo")
+        .arg(format!("local={repo}"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache-main"))
+        .arg("dev.telegraphic:hello-tool:1.0.0")
+        .arg("--main")
+        .arg("dev.telegraphic.tool.Tool")
+        .arg("--")
+        .arg("gamma")
+        .output()
+        .expect("failed to run juv juvx with --main after coordinate");
+
+    assert_success(&output);
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "juvx gamma");
 }
