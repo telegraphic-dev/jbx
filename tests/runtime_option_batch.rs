@@ -76,7 +76,7 @@ fn build_accepts_java_repo_source_files_and_compile_option_overrides() {
     let out = juv_command()
         .arg("build")
         .arg("--java")
-        .arg("17")
+        .arg("25")
         .arg("--repo")
         .arg("central=https://repo1.maven.org/maven2")
         .arg("--source")
@@ -153,7 +153,7 @@ class InfoOptions { public static void main(String[] args) {} }
         .arg("info")
         .arg("tools")
         .arg("--java")
-        .arg("17")
+        .arg("25")
         .arg("--repo")
         .arg("custom=https://repo.example.invalid/maven")
         .arg("--source")
@@ -169,7 +169,7 @@ class InfoOptions { public static void main(String[] args) {} }
         .unwrap();
     assert_success(&tools);
     let json: Value = serde_json::from_slice(&tools.stdout).unwrap();
-    assert_eq!(json["requestedJavaVersion"], "17");
+    assert_eq!(json["requestedJavaVersion"], "25");
     assert!(json["repositories"]
         .as_array()
         .unwrap()

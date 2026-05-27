@@ -43,7 +43,7 @@ fn init_writes_deps_and_java_directives() {
         .current_dir(tmp.path())
         .arg("init")
         .arg("--java")
-        .arg("17")
+        .arg("25")
         .arg("--deps")
         .arg("info.picocli:picocli:4.7.6,com.google.guava:guava:33.3.1-jre")
         .arg("UseDeps.java")
@@ -52,7 +52,7 @@ fn init_writes_deps_and_java_directives() {
 
     assert_success(&out);
     let content = fs::read_to_string(&script).unwrap();
-    assert!(content.contains("//JAVA 17"));
+    assert!(content.contains("//JAVA 25"));
     assert!(content.contains("//DEPS info.picocli:picocli:4.7.6"));
     assert!(content.contains("//DEPS com.google.guava:guava:33.3.1-jre"));
 }

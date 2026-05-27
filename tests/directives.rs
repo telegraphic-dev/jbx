@@ -3,7 +3,7 @@ use juv::{parse_directives, split_directive_words};
 #[test]
 fn parses_core_jbang_directives() {
     let src = r#"
-//JAVA 21
+//JAVA 25
 //DEPS org.slf4j:slf4j-simple:2.0.13, org.slf4j:slf4j-api:2.0.13
 //REPOS central=https://repo1.maven.org/maven2
 //SOURCES helper.java
@@ -15,7 +15,7 @@ class Main {}
 "#;
 
     let directives = parse_directives(src);
-    assert_eq!(directives.java_version.as_deref(), Some("21"));
+    assert_eq!(directives.java_version.as_deref(), Some("25"));
     assert_eq!(directives.main_class.as_deref(), Some("com.acme.Main"));
     assert_eq!(
         directives.deps,
