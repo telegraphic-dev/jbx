@@ -467,15 +467,15 @@ impl fmt::Display for ResolvedArtifact {
     }
 }
 
-/// Resolve a set of root coordinates into a full dependency list.
+/// Resolve Maven coordinates to their transitive dependency artifacts (metadata only).
 ///
 /// `coordinates` are Maven coordinates like `org.slf4j:slf4j-api:2.0.13`.
-/// `repos` is the list of Maven repositories to search.
-/// `cache_dir` is where downloaded JARs are stored.
+/// Returns resolved artifact metadata (groupId, artifactId, version, classifier).
+/// Does NOT download JARs — use `resolve_classpath` for that.
 pub fn resolve(
     coordinates: &[String],
     repos: &[Repository],
-    cache_dir: &Path,
+    _cache_dir: &Path,
 ) -> Result<Vec<ResolvedArtifact>> {
     // Parse root coordinates
     let mut root_deps: Vec<Dependency> = Vec::new();
@@ -612,27 +612,7 @@ pub fn resolve(
             .then_with(|| a.module.name.cmp(&b.module.name))
     });
 
-    // Download JARs
-    let mut jar_paths: Vec<PathBuf> = Vec::new();
-    fs::create_dir_all(cache_dir).context("failed to create cache directory")?;
-    for artifact in &artifacts {
-        match download_jar(artifact, repos, cache_dir) {
-            Ok(path) => jar_paths.push(path),
-            Err(e) => {
-                // POM-only artifacts (BOMs, parent POMs) won't have JARs — skip silently
-                if let Some(project) =
-                    project_cache.get(&(artifact.module.clone(), artifact.version.clone()))
-                {
-                    if project.packaging == "pom" {
-                        continue;
-                    }
-                }
-                return Err(e.context(format!("failed to download JAR for {artifact}")));
-            }
-        }
-    }
-
-    // Return as resolved artifacts (caller can get jar paths from cache)
+    // Return as resolved artifacts (metadata only, no JAR download)
     Ok(artifacts)
 }
 
@@ -643,6 +623,16 @@ pub fn resolve_classpath(
     cache_dir: &Path,
 ) -> Result<Vec<PathBuf>> {
     let artifacts = resolve(coordinates, repos, cache_dir)?;
+
+    // Download all JARs (resolve is now metadata-only)
+    fs::create_dir_all(cache_dir).context("failed to create cache directory")?;
+    for artifact in &artifacts {
+        if let Err(e) = download_jar(artifact, repos, cache_dir) {
+            // POM-only artifacts (BOMs, parent POMs) won't have JARs — skip silently
+            // We can't tell from here if it's POM-only, so just warn
+            eprintln!("warning: could not download JAR for {artifact}: {e:#}");
+        }
+    }
 
     let mut paths: Vec<PathBuf> = Vec::new();
     for artifact in &artifacts {
@@ -757,13 +747,6 @@ fn extract_dependencies(project: &Project, from_dep: &Dependency) -> Vec<Depende
         effective.exclusions.extend(from_dep.exclusions.clone());
 
         deps.push(effective);
-    }
-
-    // Handle relocation: if this project declares a relocation, return ONLY
-    // the relocation target — the old coordinates should not remain in the
-    // resolved set. The caller (resolve()) handles the replacement.
-    if let Some(ref relocation) = project.relocation {
-        return vec![relocation.clone()];
     }
 
     deps
@@ -1089,6 +1072,15 @@ fn download_jar(
                 let mut file = std::fs::File::create(&jar_path)
                     .context(format!("failed to create {jar_path:?}"))?;
                 std::io::copy(&mut body, &mut file)?;
+
+                // Verify SHA1 checksum
+                if let Err(e) = verify_sha1(&url, &jar_path) {
+                    // Delete corrupted file and try next repo
+                    let _ = fs::remove_file(&jar_path);
+                    eprintln!("warning: SHA1 verification failed for {artifact}: {e}");
+                    continue;
+                }
+
                 return Ok(jar_path);
             }
             Err(_) => continue,
@@ -1096,6 +1088,40 @@ fn download_jar(
     }
 
     Err(anyhow!("JAR for {artifact} not found in any repository"))
+}
+
+/// Verify the SHA1 checksum of a downloaded JAR against the published `.sha1` file.
+fn verify_sha1(jar_url: &str, jar_path: &Path) -> Result<()> {
+    use sha1::Digest;
+    let sha1_url = format!("{jar_url}.sha1");
+    let expected = match ureq::get(&sha1_url).call() {
+        Ok(response) => {
+            let mut text = String::new();
+            response.into_reader().read_to_string(&mut text)?;
+            // SHA1 files may contain "hash  filename" — take only the hash
+            text.split_whitespace()
+                .next()
+                .ok_or_else(|| anyhow!("empty SHA1 response for {sha1_url}"))?
+                .to_string()
+        }
+        Err(_) => {
+            // No SHA1 file available — skip verification (some repos don't publish them)
+            return Ok(());
+        }
+    };
+
+    let mut hasher = sha1::Sha1::new();
+    let mut file = std::fs::File::open(jar_path)?;
+    std::io::copy(&mut file, &mut hasher)?;
+    let actual = format!("{:x}", hasher.finalize());
+
+    if actual != expected {
+        anyhow::bail!(
+            "SHA1 mismatch: expected {expected}, got {actual} for {}",
+            jar_path.display()
+        );
+    }
+    Ok(())
 }
 
 /// Create a symlink on Unix, or copy the file on non-Unix platforms.
