@@ -432,11 +432,7 @@ fn install_from_adoptium(major_version: u32) -> anyhow::Result<PathBuf> {
     extract_jdk_archive(&archive_path, &tmp_dir, os)?;
 
     // Adoptium .tar.gz contains a single directory like jdk-25.0.3+9 — move its contents up
-    let actual_root = if let Some(single_child) = find_single_subdir(&tmp_dir) {
-        single_child
-    } else {
-        tmp_dir.clone()
-    };
+    let actual_root = find_extracted_jdk_root(&tmp_dir, os);
 
     // Move to final location
     if target_dir.exists() {
@@ -518,6 +514,24 @@ fn extract_jdk_archive(archive_path: &Path, target_dir: &Path, os: &str) -> anyh
             .with_context(|| "failed to extract JDK tar.gz archive")?;
     }
     Ok(())
+}
+
+/// Resolve the real JDK root within an extracted Adoptium archive.
+///
+/// Linux/Windows archives contain a single top-level directory that is already
+/// the JDK root. macOS archives contain `<name>.jdk/Contents/Home`, and that
+/// inner Home directory is the root with `bin/java`, `bin/javac`, and `release`.
+fn find_extracted_jdk_root(dir: &Path, os: &str) -> PathBuf {
+    let single_child = find_single_subdir(dir);
+    if os == "mac" {
+        if let Some(bundle) = single_child.as_ref() {
+            let home = bundle.join("Contents").join("Home");
+            if looks_like_jdk_root(&home) {
+                return home;
+            }
+        }
+    }
+    single_child.unwrap_or_else(|| dir.to_path_buf())
 }
 
 /// If a directory contains exactly one subdirectory, return it.
@@ -711,6 +725,18 @@ mod tests {
             arch,
             "x64" | "aarch64" | "arm" | "riscv64" | "ppc64" | "ppc64le" | "s390x"
         ));
+    }
+
+    #[test]
+    fn test_find_extracted_jdk_root_handles_macos_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("jdk-25.jdk").join("Contents").join("Home");
+        fs::create_dir_all(home.join("bin")).unwrap();
+        fs::write(java_bin_path(&home), "").unwrap();
+        fs::write(javac_bin_path(&home), "").unwrap();
+        fs::write(home.join("release"), "JAVA_VERSION=\"25\"\n").unwrap();
+
+        assert_eq!(find_extracted_jdk_root(tmp.path(), "mac"), home);
     }
 
     #[test]
