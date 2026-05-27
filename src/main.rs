@@ -8,9 +8,9 @@ use std::{
 use juv::{
     alias_add, alias_remove, app_bin_dir, app_install, app_list, app_uninstall, build_java,
     cache_entries, catalog_aliases, clear_cache, default_cache_dir, export_jar, init_script,
-    resolve_catalog_alias, run_java, split_directive_words, trust_add, trust_clear, trust_entries,
-    trust_remove, AliasAddOptions, AliasRemoveOptions, AppInstallOptions, BuildOptions, ExportKind,
-    ExportOptions, InitOptions, KeyValue, RunOptions,
+    init_templates, resolve_catalog_alias, run_java, split_directive_words, trust_add, trust_clear,
+    trust_entries, trust_remove, AliasAddOptions, AliasRemoveOptions, AppInstallOptions,
+    BuildOptions, ExportKind, ExportOptions, InitOptions, KeyValue, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -47,6 +47,8 @@ enum Commands {
     Alias(AliasCommand),
     /// Export runnable JARs.
     Export(ExportCommand),
+    /// List built-in init templates.
+    Template(TemplateCommand),
     /// Resolve Maven dependencies without running.
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
@@ -440,6 +442,25 @@ struct AliasRemoveCommand {
 
 #[derive(Parser, Debug)]
 struct AliasListCommand {
+    /// Print JSON instead of tab-separated text.
+    #[arg(long = "json")]
+    json: bool,
+}
+
+#[derive(Parser, Debug)]
+struct TemplateCommand {
+    #[command(subcommand)]
+    command: TemplateSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum TemplateSubcommand {
+    /// List built-in init templates.
+    List(TemplateListCommand),
+}
+
+#[derive(Parser, Debug)]
+struct TemplateListCommand {
     /// Print JSON instead of tab-separated text.
     #[arg(long = "json")]
     json: bool,
@@ -1107,11 +1128,6 @@ fn main() -> Result<()> {
             0
         }
         Some(Commands::Init(cmd)) => {
-            if let Some(template) = &cmd.template {
-                if template != "hello" && template != "java" {
-                    anyhow::bail!("only the default Java init template is supported for now");
-                }
-            }
             init_script(InitOptions {
                 script: cmd.script,
                 deps: cmd
@@ -1120,6 +1136,7 @@ fn main() -> Result<()> {
                     .flat_map(|dep| split_directive_words(dep))
                     .collect(),
                 java_version: cmd.java_version,
+                template: cmd.template,
                 force: cmd.force,
             })?;
             0
@@ -1445,6 +1462,27 @@ fn main() -> Result<()> {
                     ExportKind::Portable,
                 ))?)?;
                 println!("Exported to {}", output.display());
+                0
+            }
+        },
+        Some(Commands::Template(cmd)) => match cmd.command {
+            TemplateSubcommand::List(cmd) => {
+                if cmd.json {
+                    let payload = init_templates()
+                        .iter()
+                        .map(|template| {
+                            serde_json::json!({
+                                "name": template.name,
+                                "description": template.description,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    println!("{}", serde_json::to_string_pretty(&payload)?);
+                } else {
+                    for template in init_templates() {
+                        println!("{}	{}", template.name, template.description);
+                    }
+                }
                 0
             }
         },

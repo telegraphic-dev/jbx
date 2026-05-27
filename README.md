@@ -10,7 +10,8 @@ Implemented now:
 
 - `juv run <script.java> [args...]`
 - `juv build <script.java>`
-- `juv init <script.java>` default Java template generation
+- `juv init <script.java>` built-in Java template generation
+- `juv template list [--json]` list built-in init templates
 - `juv cache clear`
 - `juv cache path [--cache-dir ...]`
 - `juv cache list [--json] [--cache-dir ...]`
@@ -54,7 +55,8 @@ Implemented now:
   - `//NOINTEGRATIONS`
 - compile/run cache under the OS cache directory
 - `juv build` compiles scripts into cache without running them
-- `juv init` creates default Java scripts, supports `--deps`, `--java`, and `--force`
+- `juv init` creates Java 25+ unnamed-class scripts from built-in templates (`hello`/`java`, `compact`, `cli`, `agent`), supports `--deps`, `--java`, `--template`, and `--force`
+- `juv template list` lists built-in init templates and supports `--json`
 - `juv cache clear` clears the compiled-script cache
 - `juv cache path` prints the effective compiled-script cache directory
 - `juv cache list` lists cached script entries with their classes/cache directories and supports `--json`
@@ -91,16 +93,14 @@ Implemented now:
 - caches discovered JDKs under `~/.cache/juv/jdks/<major>` via symlinks so future runs do not rescan everything
 - auto-provisions missing JDKs from Adoptium/Eclipse Temurin with SHA-256 archive verification
 
-Not yet implemented: catalog import/list/add/remove for nested catalogs, templates beyond the default, export mavenrepo/native/jlink/project variants, edit integration, native image, and the rest of JBang's lovely edge-case museum.
+Not yet implemented: catalog import/list/add/remove for nested catalogs, external catalog templates, export mavenrepo/native/jlink/project variants, edit integration, native image, and the rest of JBang's lovely edge-case museum.
 
 ## Example
 
 ```java
-//MAIN Hello
-class Hello {
-  public static void main(String[] args) {
-    System.out.println("hello " + args[0]);
-  }
+//JAVA 25+
+void main(String[] args) {
+  IO.println("hello " + args[0]);
 }
 ```
 
