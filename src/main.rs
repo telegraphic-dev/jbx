@@ -8,10 +8,10 @@ use std::{
 use juv::{
     alias_add, alias_remove, app_bin_dir, app_install, app_list, app_uninstall, build_java,
     cache_entries, catalog_add, catalog_aliases, catalog_refs, catalog_templates, clear_cache,
-    default_cache_dir, export_jar, export_native, init_script, resolve_catalog_alias, run_java,
-    split_directive_words, trust_add, trust_clear, trust_entries, trust_remove, AliasAddOptions,
-    AliasRemoveOptions, AppInstallOptions, BuildOptions, CatalogAddOptions, ExportKind,
-    ExportOptions, InitOptions, KeyValue, NativeExportOptions, RunOptions,
+    default_cache_dir, export_jar, export_native, init_script, juvx, resolve_catalog_alias,
+    run_java, split_directive_words, trust_add, trust_clear, trust_entries, trust_remove,
+    AliasAddOptions, AliasRemoveOptions, AppInstallOptions, BuildOptions, CatalogAddOptions,
+    ExportKind, ExportOptions, InitOptions, KeyValue, NativeExportOptions, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -56,6 +56,8 @@ enum Commands {
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
     Fetch(FetchCommand),
+    /// Run an executable JAR resolved from Maven coordinates.
+    Juvx(JuvxCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
 }
@@ -720,6 +722,28 @@ struct FetchCommand {
 }
 
 #[derive(Parser, Debug)]
+struct JuvxCommand {
+    /// Maven coordinate to resolve and run (groupId:artifactId[:classifier]:version).
+    coordinate: String,
+
+    /// Additional repository (id=url format or bare URL).
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Override dependency cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Main class to launch with the resolved classpath instead of java -jar.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Arguments passed to the launched Java tool after `--`.
+    #[arg(last = true)]
+    args: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
 struct CacheClearCommand {
     /// Override cache directory.
     #[arg(long = "cache-dir")]
@@ -1292,6 +1316,16 @@ fn tools_payload(script: &std::path::Path, output: &juv::BuildOutput) -> serde_j
     })
 }
 
+fn run_juvx(cmd: JuvxCommand) -> Result<i32> {
+    juvx::run(juvx::JuvxOptions {
+        coordinate: cmd.coordinate,
+        repos: cmd.repos,
+        cache_dir: cmd.cache_dir,
+        main_class: cmd.main_class,
+        args: cmd.args,
+    })
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let code = match cli.command {
@@ -1723,23 +1757,7 @@ fn main() -> Result<()> {
                 Some(path) => path,
                 None => default_cache_dir()?.join("deps"),
             };
-            let mut repos = vec![juv::resolver::Repository::central()];
-            for repo in &cmd.repos {
-                if repo == "central" || repo == "mavenCentral" {
-                    continue; // already included
-                }
-                if let Some((id, url)) = repo.split_once('=') {
-                    repos.push(juv::resolver::Repository {
-                        id: id.to_string(),
-                        url: url.to_string(),
-                    });
-                } else {
-                    repos.push(juv::resolver::Repository {
-                        id: repo.clone(),
-                        url: repo.clone(),
-                    });
-                }
-            }
+            let repos = juvx::maven_repositories(&cmd.repos);
             if cmd.classpath {
                 let paths = juv::resolver::resolve_classpath(&cmd.coordinates, &repos, &cache_dir)?;
                 println!("{}", std::env::join_paths(paths)?.to_string_lossy());
@@ -1756,23 +1774,7 @@ fn main() -> Result<()> {
                 Some(path) => path,
                 None => default_cache_dir()?.join("deps"),
             };
-            let mut repos = vec![juv::resolver::Repository::central()];
-            for repo in &cmd.repos {
-                if repo == "central" || repo == "mavenCentral" {
-                    continue; // already included
-                }
-                if let Some((id, url)) = repo.split_once('=') {
-                    repos.push(juv::resolver::Repository {
-                        id: id.to_string(),
-                        url: url.to_string(),
-                    });
-                } else {
-                    repos.push(juv::resolver::Repository {
-                        id: repo.clone(),
-                        url: repo.clone(),
-                    });
-                }
-            }
+            let repos = juvx::maven_repositories(&cmd.repos);
             if cmd.deps_only {
                 let artifacts = juv::resolver::resolve(&cmd.coordinates, &repos, &cache_dir)?;
                 for artifact in &artifacts {
@@ -1784,6 +1786,7 @@ fn main() -> Result<()> {
             }
             0
         }
+        Some(Commands::Juvx(cmd)) => run_juvx(cmd)?,
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
                 let jdks = juv::jdk::list_jdks()?;

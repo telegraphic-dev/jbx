@@ -89,6 +89,8 @@ Implemented now:
 - `juv resolve --classpath <coordinates...>` resolve to classpath
 - `juv fetch <coordinates...>` fetch artifacts and print classpath
 - `juv fetch --deps-only <coordinates...>` print coordinates instead of paths
+- `juvx <GAV> -- [args...]` run an executable JAR resolved from Maven coordinates
+- `juvx --main <class> <GAV> -- [args...]` run a main class with the resolved classpath
 - `juv jdk list` list discovered/cached JDKs
 - `juv jdk home [version]` print the JDK home for a version (default: 25)
 - `juv jdk install <version>` download a Temurin JDK from Adoptium
