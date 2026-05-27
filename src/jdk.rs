@@ -52,9 +52,15 @@ pub fn find_jdk(major_version: u32, auto_install: bool) -> anyhow::Result<PathBu
         }
     }
 
-    // 4. Re-check cache
-    if discovered.contains_key(&major_version) {
-        return Ok(jdk_dir.join(major_version.to_string()));
+    // 4. Re-check cache. If cache linking failed (for example on a read-only
+    // filesystem), use the discovered JDK root directly instead of returning a
+    // non-existent cache path.
+    if let Some(root) = discovered.get(&major_version) {
+        let cached_path = jdk_dir.join(major_version.to_string());
+        if looks_like_jdk_root(&cached_path) {
+            return Ok(cached_path);
+        }
+        return Ok(root.clone());
     }
 
     // 5. Auto-provision from Adoptium
