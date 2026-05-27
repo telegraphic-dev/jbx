@@ -246,8 +246,6 @@ class PreviewSwitch {
 #[test]
 #[cfg(unix)]
 fn resolves_deps_with_native_resolver() {
-    use std::os::unix::fs::PermissionsExt;
-
     let tmp = tempfile::tempdir().unwrap();
 
     // Build a tiny library JAR: com.example:greeter:1.0.0
@@ -314,43 +312,21 @@ public class Greeter {
     )
     .unwrap();
 
-    // Find a free ephemeral port to avoid conflicts in parallel CI
-    let port = {
-        let s = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        s.local_addr().unwrap().port()
-    };
-    let server_script = tmp.path().join("serve.sh");
+    // In-process static file server — no TOCTOU port race, no python3 dependency
     let repo_dir = tmp.path().join("repo");
-    fs::write(
-        &server_script,
-        format!(
-            "#!/bin/sh\nexec python3 -m http.server {port} --bind 127.0.0.1 --directory '{}'",
-            repo_dir.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&server_script, fs::Permissions::from_mode(0o755)).unwrap();
-
-    #[allow(clippy::zombie_processes)]
-    let mut server = Command::new(&server_script)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-
-    // Wait for server to be ready
-    let mut ready = false;
-    for _ in 0..50 {
-        if ureq::get(&format!("http://127.0.0.1:{port}/"))
-            .call()
-            .is_ok()
-        {
-            ready = true;
-            break;
+    let repo_dir_clone = repo_dir.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server_handle = std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let repo = repo_dir_clone.clone();
+            std::thread::spawn(move || serve_file(stream, &repo));
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    assert!(ready, "local Maven repo server did not start");
+    });
 
     let app = tmp.path().join("UseDep.java");
     fs::write(
@@ -372,9 +348,7 @@ class UseDep {{
 
     let out = juv_command().arg("run").arg(&app).output().unwrap();
 
-    // Clean up server
-    let _ = kill(server.id());
-    let _ = server.wait();
+    // Server thread will be cleaned up when the process exits
 
     assert!(
         out.status.success(),
@@ -385,7 +359,37 @@ class UseDep {{
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "deps-ok");
 }
 
-fn kill(pid: u32) -> std::io::Result<()> {
-    Command::new("kill").arg(pid.to_string()).output()?;
-    Ok(())
+/// Minimal HTTP file server for integration tests.
+/// Serves GET requests with static files from `root_dir`.
+fn serve_file(mut stream: std::net::TcpStream, root_dir: &std::path::Path) {
+    use std::io::{BufRead, Read, Write};
+    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+    let mut request = String::new();
+    if reader.read_line(&mut request).is_err() {
+        return;
+    }
+    // Parse path from "GET /path HTTP/1.1"
+    let path = request
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("/")
+        .trim_start_matches('/');
+    let file_path = root_dir.join(path);
+
+    let (status, body) = if file_path.exists() && file_path.starts_with(root_dir) {
+        let mut buf = Vec::new();
+        let mut f = std::fs::File::open(&file_path).unwrap();
+        f.read_to_end(&mut buf).unwrap();
+        ("200 OK", buf)
+    } else {
+        ("404 Not Found", b"Not Found".to_vec())
+    };
+
+    let header = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(&body);
+    let _ = stream.flush();
 }
