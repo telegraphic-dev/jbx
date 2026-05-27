@@ -347,7 +347,9 @@ pub fn trust_entries(cache_dir: Option<&Path>) -> Result<Vec<(String, String)>> 
 pub fn trust_add(url: &str, cache_dir: Option<&Path>) -> Result<String> {
     ensure_remote_url(url)?;
     let source = fetch_remote_script(url)?;
-    let hash = sha256_hex(&source);
+    let directives = parse_directives(&source);
+    let resources = collect_remote_relative_resources(&directives, url)?;
+    let hash = trusted_remote_hash(&source, &resources);
     write_trust_entry(url, &hash, cache_dir)?;
     Ok(hash)
 }
@@ -382,10 +384,18 @@ fn materialize_script(
     let script_text = script.to_string_lossy();
     if is_remote_url(&script_text) {
         let source = fetch_remote_script(&script_text)?;
-        let hash = sha256_hex(&source);
+        let directives = parse_directives(&source);
+        let resources = collect_remote_relative_resources(&directives, &script_text)?;
+        let hash = trusted_remote_hash(&source, &resources);
         if trust_remote {
             write_trust_entry(&script_text, &hash, cache_dir)?;
-        } else if !is_trusted_remote(&script_text, &hash, cache_dir)? {
+        } else if !is_trusted_remote_with_legacy_fallback(
+            &script_text,
+            &hash,
+            &source,
+            resources.is_empty(),
+            cache_dir,
+        )? {
             return Err(anyhow!(
                 "remote script {} is not trusted; run `juv trust add {}` or pass `juv run --trust {}`",
                 script_text,
@@ -402,6 +412,7 @@ fn materialize_script(
         fs::create_dir_all(&remote_dir)?;
         let path = remote_dir.join(file_name);
         fs::write(&path, &source)?;
+        materialize_remote_relative_resources(&resources, &remote_dir)?;
         return Ok(MaterializedScript { path, source });
     }
 
@@ -436,10 +447,164 @@ fn fetch_remote_script(url: &str) -> Result<String> {
         .map_err(|err| anyhow!("failed to read response from {url}: {err}"))
 }
 
-fn is_trusted_remote(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<bool> {
-    Ok(trust_entries(cache_dir)?
+#[derive(Debug)]
+struct RemoteRelativeResource {
+    resource_ref: String,
+    url: String,
+    body: String,
+}
+
+fn collect_remote_relative_resources(
+    directives: &Directives,
+    remote_url: &str,
+) -> Result<Vec<RemoteRelativeResource>> {
+    let mut resources = Vec::new();
+    let source_refs = directives.sources.iter().chain(
+        directives
+            .deps
+            .iter()
+            .filter(|dep| !looks_like_binary_dependency(dep)),
+    );
+    for source_ref in source_refs {
+        collect_remote_relative_ref(remote_url, source_ref, &mut resources)?;
+    }
+
+    for file_ref in &directives.files {
+        let (_, source) = split_file_ref(file_ref);
+        let source_ref = source
+            .to_str()
+            .ok_or_else(|| anyhow!("invalid non-UTF-8 //FILES resource: {file_ref}"))?;
+        collect_remote_relative_ref(remote_url, source_ref, &mut resources)?;
+    }
+
+    resources.sort_by(|a, b| a.resource_ref.cmp(&b.resource_ref).then(a.url.cmp(&b.url)));
+    Ok(resources)
+}
+
+fn collect_remote_relative_ref(
+    remote_url: &str,
+    resource_ref: &str,
+    resources: &mut Vec<RemoteRelativeResource>,
+) -> Result<()> {
+    if resource_ref.is_empty() || looks_like_binary_dependency(resource_ref) {
+        return Ok(());
+    }
+    validate_remote_relative_ref(resource_ref)?;
+    let url = resolve_remote_resource_url(remote_url, resource_ref)?;
+    let body = fetch_remote_script(&url)?;
+    resources.push(RemoteRelativeResource {
+        resource_ref: resource_ref.to_string(),
+        url,
+        body,
+    });
+    Ok(())
+}
+
+fn materialize_remote_relative_resources(
+    resources: &[RemoteRelativeResource],
+    remote_dir: &Path,
+) -> Result<()> {
+    for resource in resources {
+        let local_path = remote_dir.join(&resource.resource_ref);
+        if let Some(parent) = local_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&local_path, &resource.body).with_context(|| {
+            format!(
+                "failed to cache remote resource {} at {}",
+                resource.url,
+                local_path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_remote_relative_ref(resource_ref: &str) -> Result<()> {
+    if Path::new(resource_ref).is_absolute()
+        || resource_ref.starts_with('/')
+        || resource_ref.contains('\\')
+    {
+        return Err(anyhow!(
+            "only relative URL paths are supported for remote resources: {resource_ref}"
+        ));
+    }
+    if resource_ref
+        .split('/')
+        .any(|part| part == ".." || part == "." || part.is_empty())
+    {
+        return Err(anyhow!(
+            "remote resource paths must not contain empty or parent segments: {resource_ref}"
+        ));
+    }
+    Ok(())
+}
+
+fn trusted_remote_hash(source: &str, resources: &[RemoteRelativeResource]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"juv-remote-v2\nmain\0");
+    hasher.update(source.as_bytes());
+    for resource in resources {
+        hasher.update(b"\nresource\0");
+        hasher.update(resource.resource_ref.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(resource.url.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(resource.body.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn legacy_remote_hash(source: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(source.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn resolve_remote_resource_url(remote_url: &str, resource_ref: &str) -> Result<String> {
+    let no_query = remote_url
+        .split(['?', '#'])
+        .next()
+        .ok_or_else(|| anyhow!("invalid remote URL: {remote_url}"))?;
+    let scheme_end = no_query
+        .find("://")
+        .ok_or_else(|| anyhow!("invalid remote URL: {remote_url}"))?;
+    let after_scheme = scheme_end + 3;
+    let host_end = no_query[after_scheme..]
+        .find('/')
+        .map(|idx| after_scheme + idx)
+        .unwrap_or(no_query.len());
+    let origin = &no_query[..host_end];
+
+    if resource_ref.starts_with('/') {
+        return Ok(format!("{origin}{resource_ref}"));
+    }
+
+    let base_dir = match no_query.rfind('/') {
+        Some(idx) if idx >= host_end => &no_query[..idx + 1],
+        _ => &format!("{origin}/"),
+    };
+    Ok(format!("{base_dir}{resource_ref}"))
+}
+
+fn is_trusted_remote_with_legacy_fallback(
+    url: &str,
+    hash: &str,
+    source: &str,
+    allow_legacy_hash: bool,
+    cache_dir: Option<&Path>,
+) -> Result<bool> {
+    let entries = trust_entries(cache_dir)?;
+    if entries
         .iter()
-        .any(|(entry_url, entry_hash)| entry_url == url && entry_hash == hash))
+        .any(|(entry_url, entry_hash)| entry_url == url && entry_hash == hash)
+    {
+        return Ok(true);
+    }
+    Ok(allow_legacy_hash
+        && entries.iter().any(|(entry_url, entry_hash)| {
+            entry_url == url && entry_hash == &legacy_remote_hash(source)
+        }))
 }
 
 fn write_trust_entry(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<()> {
@@ -486,12 +651,6 @@ fn remote_file_name(url: &str) -> String {
     } else {
         format!("{name}.java")
     }
-}
-
-fn sha256_hex(text: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(text.as_bytes());
-    format!("{:x}", hasher.finalize())
 }
 
 pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {

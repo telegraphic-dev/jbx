@@ -58,7 +58,7 @@ fn jdk_home_accepts_jbang_plus_version_selector() {
 fn jdk_home_fails_for_missing_version_without_auto_install() {
     // Version 999 doesn't exist; without auto-install it should fail
     let output = juv_command()
-        .args(&["jdk", "home", "999"])
+        .args(["jdk", "home", "999"])
         .output()
         .expect("failed to run juv");
     assert!(
