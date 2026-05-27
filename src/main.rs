@@ -1,6 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use juv::{
     app_bin_dir, app_install, app_list, app_uninstall, build_java, cache_entries, catalog_aliases,
@@ -681,60 +684,87 @@ fn print_cache_path(cache_dir: Option<PathBuf>) -> Result<()> {
 }
 
 fn apply_alias_to_run(mut options: RunOptions) -> Result<RunOptions> {
-    let name = options.script.to_string_lossy().to_string();
-    if options.script.exists() || name.starts_with("http://") || name.starts_with("https://") {
-        return Ok(options);
-    }
-    let cwd = std::env::current_dir()?;
-    if let Some(alias) = resolve_catalog_alias(&name, &cwd)? {
-        options.script = alias.script;
-        options.script_args = alias
-            .arguments
-            .into_iter()
-            .chain(options.script_args)
-            .collect();
-        options.extra_deps = prepend(alias.deps, options.extra_deps);
-        options.extra_repos = prepend(alias.repos, options.extra_repos);
-        options.extra_sources = prepend(alias.sources, options.extra_sources);
-        options.extra_files = prepend(alias.files, options.extra_files);
-        options.classpath = prepend(alias.classpaths, options.classpath);
-        options.javac_options = prepend(alias.javac_options, options.javac_options);
-        options.runtime_options = prepend(alias.runtime_options, options.runtime_options);
-        options.java_agents = prepend(alias.java_agents, options.java_agents);
-        if options.java_version.is_none() {
-            options.java_version = alias.java_version;
-        }
-        if options.main_class.is_none() {
-            options.main_class = alias.main_class;
-        }
+    if let Some(alias) = alias_for_script(&options.script)? {
+        merge_alias_common(
+            &alias,
+            &mut options.script,
+            &mut options.extra_deps,
+            &mut options.extra_repos,
+            &mut options.extra_sources,
+            &mut options.extra_files,
+            &mut options.classpath,
+            &mut options.javac_options,
+            &mut options.runtime_options,
+            &mut options.java_agents,
+            &mut options.java_version,
+            &mut options.main_class,
+        );
+        options.script_args = prepend(alias.arguments, options.script_args);
     }
     Ok(options)
 }
 
 fn apply_alias_to_build(mut options: BuildOptions) -> Result<BuildOptions> {
-    let name = options.script.to_string_lossy().to_string();
-    if options.script.exists() || name.starts_with("http://") || name.starts_with("https://") {
-        return Ok(options);
-    }
-    let cwd = std::env::current_dir()?;
-    if let Some(alias) = resolve_catalog_alias(&name, &cwd)? {
-        options.script = alias.script;
-        options.extra_deps = prepend(alias.deps, options.extra_deps);
-        options.extra_repos = prepend(alias.repos, options.extra_repos);
-        options.extra_sources = prepend(alias.sources, options.extra_sources);
-        options.extra_files = prepend(alias.files, options.extra_files);
-        options.classpath = prepend(alias.classpaths, options.classpath);
-        options.javac_options = prepend(alias.javac_options, options.javac_options);
-        options.runtime_options = prepend(alias.runtime_options, options.runtime_options);
-        options.java_agents = prepend(alias.java_agents, options.java_agents);
-        if options.java_version.is_none() {
-            options.java_version = alias.java_version;
-        }
-        if options.main_class.is_none() {
-            options.main_class = alias.main_class;
-        }
+    if let Some(alias) = alias_for_script(&options.script)? {
+        merge_alias_common(
+            &alias,
+            &mut options.script,
+            &mut options.extra_deps,
+            &mut options.extra_repos,
+            &mut options.extra_sources,
+            &mut options.extra_files,
+            &mut options.classpath,
+            &mut options.javac_options,
+            &mut options.runtime_options,
+            &mut options.java_agents,
+            &mut options.java_version,
+            &mut options.main_class,
+        );
     }
     Ok(options)
+}
+
+fn alias_for_script(script: &Path) -> Result<Option<juv::CatalogAlias>> {
+    let name = script.to_string_lossy().to_string();
+    if script.exists() || name.starts_with("http://") || name.starts_with("https://") {
+        return Ok(None);
+    }
+    resolve_catalog_alias(&name, &std::env::current_dir()?)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merge_alias_common(
+    alias: &juv::CatalogAlias,
+    script: &mut PathBuf,
+    extra_deps: &mut Vec<String>,
+    extra_repos: &mut Vec<String>,
+    extra_sources: &mut Vec<String>,
+    extra_files: &mut Vec<String>,
+    classpath: &mut Vec<PathBuf>,
+    javac_options: &mut Vec<String>,
+    runtime_options: &mut Vec<String>,
+    java_agents: &mut Vec<KeyValue>,
+    java_version: &mut Option<String>,
+    main_class: &mut Option<String>,
+) {
+    *script = alias.script.clone();
+    *extra_deps = prepend(alias.deps.clone(), std::mem::take(extra_deps));
+    *extra_repos = prepend(alias.repos.clone(), std::mem::take(extra_repos));
+    *extra_sources = prepend(alias.sources.clone(), std::mem::take(extra_sources));
+    *extra_files = prepend(alias.files.clone(), std::mem::take(extra_files));
+    *classpath = prepend(alias.classpaths.clone(), std::mem::take(classpath));
+    *javac_options = prepend(alias.javac_options.clone(), std::mem::take(javac_options));
+    *runtime_options = prepend(
+        alias.runtime_options.clone(),
+        std::mem::take(runtime_options),
+    );
+    *java_agents = prepend(alias.java_agents.clone(), std::mem::take(java_agents));
+    if java_version.is_none() {
+        *java_version = alias.java_version.clone();
+    }
+    if main_class.is_none() {
+        *main_class = alias.main_class.clone();
+    }
 }
 
 fn prepend<T>(prefix: Vec<T>, existing: Vec<T>) -> Vec<T> {
@@ -752,6 +782,17 @@ fn print_aliases(json: bool) -> Result<()> {
                     "scriptRef": alias.script_ref,
                     "script": alias.script.to_string_lossy(),
                     "description": alias.description,
+                    "arguments": alias.arguments,
+                    "dependencies": alias.deps,
+                    "repositories": alias.repos,
+                    "sources": alias.sources,
+                    "files": alias.files,
+                    "classpaths": alias.classpaths.iter().map(|path| path.to_string_lossy().to_string()).collect::<Vec<_>>(),
+                    "compileOptions": alias.javac_options,
+                    "runtimeOptions": alias.runtime_options,
+                    "javaAgents": key_values_json(&alias.java_agents),
+                    "javaVersion": alias.java_version,
+                    "mainClass": alias.main_class,
                 })
             })
             .collect::<Vec<_>>();
