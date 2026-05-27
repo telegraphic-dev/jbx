@@ -55,7 +55,7 @@ Implemented now:
   - `//NOINTEGRATIONS`
 - compile/run cache under the OS cache directory
 - `juv build` compiles scripts into cache without running them
-- `juv init` creates Java scripts from built-in templates (`hello`/`java`, `compact`, `cli`, `agent`), supports `--deps`, `--java`, `--template`, and `--force`
+- `juv init` creates Java 25+ unnamed-class scripts from built-in templates (`hello`/`java`, `compact`, `cli`, `agent`), supports `--deps`, `--java`, `--template`, and `--force`
 - `juv template list` lists built-in init templates and supports `--json`
 - `juv cache clear` clears the compiled-script cache
 - `juv cache path` prints the effective compiled-script cache directory
@@ -98,11 +98,9 @@ Not yet implemented: catalog import/list/add/remove for nested catalogs, externa
 ## Example
 
 ```java
-//MAIN Hello
-class Hello {
-  public static void main(String[] args) {
-    System.out.println("hello " + args[0]);
-  }
+//JAVA 25+
+void main(String[] args) {
+  IO.println("hello " + args[0]);
 }
 ```
 

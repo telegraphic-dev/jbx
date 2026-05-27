@@ -211,7 +211,7 @@ pub struct InitTemplate {
 pub const INIT_TEMPLATES: &[InitTemplate] = &[
     InitTemplate {
         name: "hello",
-        description: "Basic Java Hello World script",
+        description: "Basic Java 25 unnamed-class Hello World script",
     },
     InitTemplate {
         name: "java",
@@ -677,14 +677,11 @@ fn render_dependency_hint(options: &InitOptions, out: &mut String) {
     }
 }
 
-fn render_hello_init_script(base_name: &str, options: &InitOptions) -> String {
+fn render_hello_init_script(_base_name: &str, options: &InitOptions) -> String {
     let mut out = String::new();
-    render_header(options, None, &mut out);
+    render_header(options, Some("25+"), &mut out);
     render_dependency_hint(options, &mut out);
-    out.push_str("import static java.lang.System.*;\n\n");
-    out.push_str(&format!(
-        "public class {base_name} {{\n\n    public static void main(String... args) {{\n        out.println(\"Hello World\");\n    }}\n}}\n"
-    ));
+    out.push_str("void main(String... args) {\n    IO.println(\"Hello World\");\n}\n");
     out
 }
 

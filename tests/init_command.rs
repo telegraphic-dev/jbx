@@ -29,9 +29,10 @@ fn init_creates_default_java_script_from_filename() {
     assert_success(&out);
     let content = fs::read_to_string(&script).unwrap();
     assert!(content.starts_with("///usr/bin/env jbang"));
-    assert!(content.contains("public class Hello"));
-    assert!(content.contains("public static void main(String... args)"));
-    assert!(content.contains("out.println(\"Hello World\")"));
+    assert!(content.contains("//JAVA 25+"));
+    assert!(content.contains("void main(String... args)"));
+    assert!(content.contains("IO.println(\"Hello World\")"));
+    assert!(!content.contains("public class"));
 }
 
 #[test]
@@ -90,7 +91,7 @@ fn init_force_overwrites_existing_file() {
 
     assert_success(&out);
     let content = fs::read_to_string(&script).unwrap();
-    assert!(content.contains("public class Existing"));
+    assert!(content.contains("void main(String... args)"));
     assert!(!content.contains("replace me"));
 }
 
@@ -187,7 +188,7 @@ fn template_list_prints_builtin_templates() {
 
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("hello\tBasic Java Hello World script"));
+    assert!(stdout.contains("hello\tBasic Java 25 unnamed-class Hello World script"));
     assert!(stdout.contains("compact\tJava 25 compact-source Hello World script"));
     assert!(stdout.contains("cli\tPicocli command-line application"));
     assert!(stdout.contains("agent\tJava agent skeleton"));
