@@ -44,6 +44,17 @@ fn jdk_home_returns_path_for_baseline_jdk() {
 }
 
 #[test]
+fn jdk_home_accepts_jbang_plus_version_selector() {
+    let plain = juv_output(&["jdk", "home", "25"]);
+    let plus = juv_output(&["jdk", "home", "25+"]);
+    assert_eq!(
+        plain.trim(),
+        plus.trim(),
+        "jdk home 25+ should resolve to the same path as jdk home 25"
+    );
+}
+
+#[test]
 fn jdk_home_fails_for_missing_version_without_auto_install() {
     // Version 999 doesn't exist; without auto-install it should fail
     let output = juv_command()

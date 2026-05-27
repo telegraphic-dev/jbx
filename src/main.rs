@@ -306,15 +306,15 @@ struct JdkListCommand;
 
 #[derive(Parser, Debug)]
 struct JdkInstallCommand {
-    /// Major JDK version to install (e.g. 21, 25).
-    version: u32,
+    /// JDK version to install (e.g. 21, 25, 25+).
+    version: String,
 }
 
 #[derive(Parser, Debug)]
 struct JdkHomeCommand {
-    /// Major JDK version (defaults to 25).
+    /// JDK version (defaults to 25).
     #[arg(default_value = "25")]
-    version: u32,
+    version: String,
 }
 
 #[derive(Parser, Debug)]
@@ -1080,12 +1080,14 @@ fn main() -> Result<()> {
                 0
             }
             JdkSubcommand::Install(cmd) => {
-                let jdk_root = juv::jdk::install_jdk(cmd.version)?;
-                println!("JDK {} installed to {}", cmd.version, jdk_root.display());
+                let version = juv::jdk::parse_java_version_directive(&cmd.version)?;
+                let jdk_root = juv::jdk::install_jdk(version)?;
+                println!("JDK {} installed to {}", version, jdk_root.display());
                 0
             }
             JdkSubcommand::Home(cmd) => {
-                let jdk_root = juv::jdk::find_jdk(cmd.version, false)?;
+                let version = juv::jdk::parse_java_version_directive(&cmd.version)?;
+                let jdk_root = juv::jdk::find_jdk(version, false)?;
                 println!("{}", jdk_root.display());
                 0
             }

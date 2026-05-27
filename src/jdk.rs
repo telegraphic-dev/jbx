@@ -339,9 +339,18 @@ fn parse_major_from_version_string(version: &str) -> Option<u32> {
             .and_then(|caps| caps.get(1).and_then(|m| m.as_str().parse().ok()));
     }
 
-    let re = MODERN_RE.get_or_init(|| regex::Regex::new(r"(\d+)").expect("valid regex"));
+    let re = MODERN_RE.get_or_init(|| regex::Regex::new(r"^(\d+)").expect("valid regex"));
     re.captures(version)
         .and_then(|caps| caps.get(1).and_then(|m| m.as_str().parse().ok()))
+}
+
+/// Parse a JBang-style `//JAVA` directive into the requested major version.
+///
+/// JBang accepts selectors such as `25+` to mean Java 25 or newer. For juv's
+/// current resolver we use the leading major as the requested floor.
+pub fn parse_java_version_directive(version: &str) -> anyhow::Result<u32> {
+    parse_major_from_version_string(version)
+        .with_context(|| format!("invalid JAVA version directive: {version}"))
 }
 
 /// Probe a JDK root directory — returns (major_version, root) if valid.
@@ -713,9 +722,7 @@ fn copy_dir_recursive(source: &Path, target: &Path) -> anyhow::Result<()> {
 /// Returns the JDK root path.
 pub fn resolve_jdk(java_version: &Option<String>, auto_install: bool) -> anyhow::Result<PathBuf> {
     let major = match java_version {
-        Some(v) => v
-            .parse::<u32>()
-            .with_context(|| format!("invalid JAVA version directive: {v}"))?,
+        Some(v) => parse_java_version_directive(v)?,
         None => default_java_version(),
     };
     find_jdk(major, auto_install)
@@ -741,6 +748,13 @@ mod tests {
         assert_eq!(parse_major_from_version_string("1.8.0_432"), Some(8));
         assert_eq!(parse_major_from_version_string("17.0.11+10"), Some(17));
         assert_eq!(parse_major_from_version_string("25"), Some(25));
+    }
+
+    #[test]
+    fn test_parse_java_version_directive_accepts_jbang_range_suffixes() {
+        assert_eq!(parse_java_version_directive("25+").unwrap(), 25);
+        assert_eq!(parse_java_version_directive("17.0.11+10").unwrap(), 17);
+        assert_eq!(parse_java_version_directive("1.8+").unwrap(), 8);
     }
 
     #[test]
