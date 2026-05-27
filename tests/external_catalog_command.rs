@@ -187,3 +187,134 @@ void main(String... args) {
     let script = fs::read_to_string(tmp.path().join("MyTool.java")).unwrap();
     assert!(script.contains("IO.println(\"Hello MyTool\")"), "{script}");
 }
+
+#[test]
+fn malformed_catalog_template_fails_with_clear_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("jbang-catalog.json"),
+        r#"{
+  "templates": {
+    "broken": { "description": "Missing file refs" }
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let init = juv_command()
+        .current_dir(tmp.path())
+        .arg("init")
+        .arg("--template")
+        .arg("broken")
+        .arg("Broken.java")
+        .output()
+        .unwrap();
+
+    assert!(!init.status.success());
+    let stderr = String::from_utf8_lossy(&init.stderr);
+    assert!(
+        stderr.contains("template 'broken' does not define file-refs"),
+        "{stderr}"
+    );
+    assert!(!tmp.path().join("Broken.java").exists());
+}
+
+#[test]
+fn template_properties_without_defaults_fail_before_writing_broken_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let external = tmp.path().join("external");
+    fs::create_dir_all(external.join("templates")).unwrap();
+    fs::write(
+        external.join("templates/tool.java"),
+        r#"//JAVA 25+
+void main() {
+    IO.println("{{greeting}}");
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        external.join("jbang-catalog.json"),
+        r#"{
+  "templates": {
+    "tool": {
+      "file-refs": { "{basename}.java": "templates/tool.java" },
+      "properties": { "greeting": { "description": "Greeting to print" } }
+    }
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbang-catalog.json"),
+        format!(
+            r#"{{
+  "catalogs": {{
+    "team": {{ "catalog-ref": "{}", "import": true }}
+  }}
+}}
+"#,
+            external.join("jbang-catalog.json").display()
+        ),
+    )
+    .unwrap();
+
+    let init = juv_command()
+        .current_dir(tmp.path())
+        .arg("init")
+        .arg("--template")
+        .arg("tool")
+        .arg("Tool.java")
+        .output()
+        .unwrap();
+
+    assert!(!init.status.success());
+    let stderr = String::from_utf8_lossy(&init.stderr);
+    assert!(
+        stderr.contains("template property 'greeting' has no default value"),
+        "{stderr}"
+    );
+    assert!(!tmp.path().join("Tool.java").exists());
+}
+
+#[test]
+fn catalog_add_prefetches_description_using_catalog_file_relative_ref() {
+    let tmp = tempfile::tempdir().unwrap();
+    let external = tmp.path().join("external");
+    let catalogs = tmp.path().join("catalogs");
+    fs::create_dir_all(&external).unwrap();
+    fs::create_dir_all(&catalogs).unwrap();
+    fs::write(
+        external.join("jbang-catalog.json"),
+        r#"{ "description": "Sibling catalog" }
+"#,
+    )
+    .unwrap();
+
+    let add = juv_command()
+        .current_dir(tmp.path())
+        .arg("catalog")
+        .arg("add")
+        .arg("sibling")
+        .arg("../external")
+        .arg("--file")
+        .arg(catalogs.join("jbang-catalog.json"))
+        .output()
+        .unwrap();
+    assert_success(&add);
+
+    let list = juv_command()
+        .current_dir(&catalogs)
+        .arg("catalog")
+        .arg("list")
+        .output()
+        .unwrap();
+    assert_success(&list);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("sibling\t../external\tSibling catalog"),
+        "{stdout}"
+    );
+}

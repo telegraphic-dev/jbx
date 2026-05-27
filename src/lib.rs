@@ -353,9 +353,10 @@ pub fn catalog_add(options: CatalogAddOptions, start_dir: &Path) -> Result<PathB
     validate_catalog_entry_name(&options.name, "catalog")?;
     let catalog_path =
         writable_catalog_file(options.catalog_file.as_deref(), options.global, start_dir)?;
+    let catalog_dir = catalog_path.parent().unwrap_or_else(|| Path::new("."));
     let description = match options.description {
         Some(description) => Some(description),
-        None => read_catalog_description_from_ref(&options.catalog_ref)
+        None => read_catalog_description_from_ref(catalog_dir, &options.catalog_ref)
             .ok()
             .flatten(),
     };
@@ -416,7 +417,7 @@ pub fn resolve_catalog_template(name: &str, start_dir: &Path) -> Result<Option<C
     }
     Ok(catalog_templates(start_dir)?
         .into_iter()
-        .find(|template| template.name == name && !template.file_refs.is_empty()))
+        .find(|template| template.name == name))
 }
 
 pub fn alias_add(options: AliasAddOptions, start_dir: &Path) -> Result<PathBuf> {
@@ -661,8 +662,11 @@ fn read_catalog_value(catalog_path: &Path) -> Result<serde_json::Value> {
         .with_context(|| format!("failed to parse catalog {}", catalog_path.display()))
 }
 
-fn read_catalog_description_from_ref(catalog_ref: &str) -> Result<Option<String>> {
-    let catalog_path = resolve_catalog_file_ref(Path::new("."), catalog_ref);
+fn read_catalog_description_from_ref(
+    catalog_dir: &Path,
+    catalog_ref: &str,
+) -> Result<Option<String>> {
+    let catalog_path = resolve_catalog_file_ref(catalog_dir, catalog_ref);
     Ok(read_catalog_value(&catalog_path)?
         .get("description")
         .and_then(|value| value.as_str())
@@ -981,12 +985,15 @@ fn render_catalog_template(
         ("className".to_string(), base_name.to_string()),
         ("name".to_string(), base_name.to_string()),
     ];
-    replacements.extend(
-        template
-            .properties
-            .iter()
-            .filter_map(|(key, value)| value.clone().map(|value| (key.clone(), value))),
-    );
+    for (key, value) in &template.properties {
+        let Some(value) = value else {
+            return Err(anyhow!(
+                "template property '{}' has no default value; property overrides are not supported yet",
+                key
+            ));
+        };
+        replacements.push((key.clone(), value.clone()));
+    }
     if let Some(version) = &options.java_version {
         replacements.push(("javaVersion".to_string(), version.clone()));
     }
