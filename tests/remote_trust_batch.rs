@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -48,6 +49,35 @@ fn serve_n(body: &'static str, requests: usize) -> String {
         }
     });
     url
+}
+
+fn serve_files(files: HashMap<&'static str, &'static str>, requests: usize) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    thread::spawn(move || {
+        for _ in 0..requests {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let read = stream.read(&mut request).unwrap_or(0);
+            let request_text = String::from_utf8_lossy(&request[..read]);
+            let path = request_text
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("/");
+            let (status, body) = match files.get(path) {
+                Some(body) => ("200 OK", *body),
+                None => ("404 Not Found", "not found"),
+            };
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+    });
+    base
 }
 
 #[test]
@@ -160,6 +190,133 @@ fn run_trust_flag_trusts_and_runs_remote_script_in_one_step() {
     let trust_file = cache.join("trust.tsv");
     assert!(trust_file.exists(), "trust file should be written");
     assert!(fs::read_to_string(trust_file).unwrap().contains(&url));
+}
+
+#[test]
+fn remote_relative_sources_are_downloaded_next_to_main_script() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let base = serve_files(
+        HashMap::from([
+            (
+                "/scripts/RemoteMain.java",
+                r#"//SOURCES helpers/RemoteHelper.java
+class RemoteMain {
+  public static void main(String[] args) { System.out.print(RemoteHelper.message()); }
+}
+"#,
+            ),
+            (
+                "/scripts/helpers/RemoteHelper.java",
+                r#"class RemoteHelper {
+  static String message() { return "remote-source-ok"; }
+}
+"#,
+            ),
+        ]),
+        2,
+    );
+    let url = format!("{base}/scripts/RemoteMain.java");
+
+    let out = juv_command()
+        .arg("run")
+        .arg("--trust")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&url)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "remote-source-ok"
+    );
+}
+
+#[test]
+fn remote_relative_source_like_deps_are_downloaded_next_to_main_script() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let base = serve_files(
+        HashMap::from([
+            (
+                "/deps/RemoteDepMain.java",
+                r#"//DEPS RemoteDepHelper.java
+class RemoteDepMain {
+  public static void main(String[] args) { System.out.print(RemoteDepHelper.message()); }
+}
+"#,
+            ),
+            (
+                "/deps/RemoteDepHelper.java",
+                r#"class RemoteDepHelper {
+  static String message() { return "remote-source-dep-ok"; }
+}
+"#,
+            ),
+        ]),
+        2,
+    );
+    let url = format!("{base}/deps/RemoteDepMain.java");
+
+    let out = juv_command()
+        .arg("run")
+        .arg("--trust")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&url)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "remote-source-dep-ok"
+    );
+}
+
+#[test]
+fn remote_relative_files_are_downloaded_as_classpath_resources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let base = serve_files(
+        HashMap::from([
+            (
+                "/examples/RemoteResource.java",
+                r#"//FILES config/app.properties=resources/app.properties
+class RemoteResource {
+  public static void main(String[] args) throws Exception {
+    try (var in = RemoteResource.class.getResourceAsStream("/config/app.properties")) {
+      System.out.print(new String(in.readAllBytes()).trim());
+    }
+  }
+}
+"#,
+            ),
+            (
+                "/examples/resources/app.properties",
+                "answer=remote-file-ok\n",
+            ),
+        ]),
+        2,
+    );
+    let url = format!("{base}/examples/RemoteResource.java");
+
+    let out = juv_command()
+        .arg("run")
+        .arg("--trust")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&url)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "answer=remote-file-ok"
+    );
 }
 
 #[test]

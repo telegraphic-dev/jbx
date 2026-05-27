@@ -55,6 +55,7 @@ Implemented now:
 - `juv trust add <url>` stores the current remote script content hash
 - `juv trust list`, `remove`, and `clear` manage trusted remote script entries
 - remote `http://` and `https://` scripts are downloaded into cache and require matching trust before build/run unless `--trust` is passed
+- remote relative `//SOURCES`, source-like `//DEPS`, and `//FILES` resources are downloaded next to the cached remote script
 - `juv info classpath` prints the script runtime classpath, with `--deps-only`
 - `juv info tools` prints JSON metadata for tooling and supports selecting a single field
 - `juv info docs` prints description and documentation references
@@ -80,7 +81,7 @@ Implemented now:
 - caches discovered JDKs under `~/.cache/juv/jdks/<major>` via symlinks so future runs do not rescan everything
 - auto-provisions missing JDKs from Adoptium/Eclipse Temurin with SHA-256 archive verification
 
-Not yet implemented: catalogs, templates beyond the default, export, edit integration, native image, remote relative resources, and the rest of JBang's lovely edge-case museum.
+Not yet implemented: catalogs, templates beyond the default, export, edit integration, native image, and the rest of JBang's lovely edge-case museum.
 
 ## Example
 

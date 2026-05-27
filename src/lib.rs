@@ -372,6 +372,7 @@ pub fn trust_clear(cache_dir: Option<&Path>) -> Result<()> {
 struct MaterializedScript {
     path: PathBuf,
     source: String,
+    remote_url: Option<String>,
 }
 
 fn materialize_script(
@@ -402,14 +403,22 @@ fn materialize_script(
         fs::create_dir_all(&remote_dir)?;
         let path = remote_dir.join(file_name);
         fs::write(&path, &source)?;
-        return Ok(MaterializedScript { path, source });
+        return Ok(MaterializedScript {
+            path,
+            source,
+            remote_url: Some(script_text.to_string()),
+        });
     }
 
     let path = fs::canonicalize(script)
         .with_context(|| format!("script not found: {}", script.display()))?;
     let source =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    Ok(MaterializedScript { path, source })
+    Ok(MaterializedScript {
+        path,
+        source,
+        remote_url: None,
+    })
 }
 
 fn is_remote_url(text: &str) -> bool {
@@ -434,6 +443,99 @@ fn fetch_remote_script(url: &str) -> Result<String> {
     response
         .into_string()
         .map_err(|err| anyhow!("failed to read response from {url}: {err}"))
+}
+
+fn materialize_remote_relative_resources(
+    directives: &Directives,
+    remote_url: &str,
+    remote_dir: &Path,
+) -> Result<()> {
+    let source_refs = directives.sources.iter().chain(
+        directives
+            .deps
+            .iter()
+            .filter(|dep| !looks_like_binary_dependency(dep)),
+    );
+    for source_ref in source_refs {
+        materialize_remote_relative_ref(remote_url, remote_dir, source_ref)?;
+    }
+
+    for file_ref in &directives.files {
+        let (_, source) = split_file_ref(file_ref);
+        let source_ref = source
+            .to_str()
+            .ok_or_else(|| anyhow!("invalid non-UTF-8 //FILES resource: {file_ref}"))?;
+        materialize_remote_relative_ref(remote_url, remote_dir, source_ref)?;
+    }
+
+    Ok(())
+}
+
+fn materialize_remote_relative_ref(
+    remote_url: &str,
+    remote_dir: &Path,
+    resource_ref: &str,
+) -> Result<()> {
+    if resource_ref.is_empty() || looks_like_binary_dependency(resource_ref) {
+        return Ok(());
+    }
+    if Path::new(resource_ref).is_absolute() || resource_ref.contains('\\') {
+        return Err(anyhow!(
+            "only relative URL paths are supported for remote resources: {resource_ref}"
+        ));
+    }
+    if resource_ref
+        .split('/')
+        .any(|part| part == ".." || part.is_empty() && resource_ref != "/")
+    {
+        return Err(anyhow!(
+            "remote resource paths must not contain empty or parent segments: {resource_ref}"
+        ));
+    }
+
+    let url = resolve_remote_resource_url(remote_url, resource_ref)?;
+    let body = fetch_remote_script(&url)?;
+    let local_path = remote_dir.join(resource_ref);
+    if let Some(parent) = local_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&local_path, body).with_context(|| {
+        format!(
+            "failed to cache remote resource {url} at {}",
+            local_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn resolve_remote_resource_url(remote_url: &str, resource_ref: &str) -> Result<String> {
+    if is_remote_url(resource_ref) {
+        return Ok(resource_ref.to_string());
+    }
+
+    let no_query = remote_url
+        .split(['?', '#'])
+        .next()
+        .ok_or_else(|| anyhow!("invalid remote URL: {remote_url}"))?;
+    let scheme_end = no_query
+        .find("://")
+        .ok_or_else(|| anyhow!("invalid remote URL: {remote_url}"))?;
+    let after_scheme = scheme_end + 3;
+    let host_end = no_query[after_scheme..]
+        .find('/')
+        .map(|idx| after_scheme + idx)
+        .unwrap_or(no_query.len());
+    let origin = &no_query[..host_end];
+
+    if resource_ref.starts_with('/') {
+        return Ok(format!("{origin}{resource_ref}"));
+    }
+
+    let base_dir = match no_query.rfind('/') {
+        Some(idx) if idx >= host_end => &no_query[..idx + 1],
+        _ => &format!("{origin}/"),
+    };
+    Ok(format!("{base_dir}{resource_ref}"))
 }
 
 fn is_trusted_remote(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<bool> {
@@ -502,6 +604,7 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     )?;
     let script = materialized.path;
     let source = materialized.source;
+    let remote_url = materialized.remote_url;
     let mut directives = parse_directives(&source);
     directives.deps.extend(options.extra_deps);
     directives.repos.extend(options.extra_repos);
@@ -515,6 +618,11 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     }
     if options.main_class.is_some() {
         directives.main_class = options.main_class;
+    }
+
+    if let Some(remote_url) = remote_url.as_deref() {
+        let remote_dir = script.parent().unwrap_or_else(|| Path::new("."));
+        materialize_remote_relative_resources(&directives, remote_url, remote_dir)?;
     }
 
     let work_dir = cache_project_dir(options.cache_dir.as_deref(), &script, &source)?;
