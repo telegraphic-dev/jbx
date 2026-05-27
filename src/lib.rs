@@ -201,8 +201,8 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
     }
 
     let builtin_template = init_template(options.template.as_deref());
-    if let Ok(template) = builtin_template {
-        validate_init_java_version(template, options.java_version.as_deref())?;
+    if let Ok(template) = builtin_template.as_ref() {
+        validate_init_java_version(*template, options.java_version.as_deref())?;
     }
     let base_name = options
         .script
