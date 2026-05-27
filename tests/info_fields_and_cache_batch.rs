@@ -32,7 +32,7 @@ fn metadata_script(dir: &std::path::Path) -> std::path::PathBuf {
     fs::write(
         &src,
         r#"//DESCRIPTION Batch demo
-//JAVA 17
+//JAVA 25
 //MAIN BatchMain
 //GAV dev.telegraphic:batch:1.0
 //MODULE dev.telegraphic.batch
@@ -56,7 +56,7 @@ fn info_field_commands_print_single_metadata_fields() {
 
     for (field, expected) in [
         ("main", "BatchMain"),
-        ("java", "17"),
+        ("java", "25"),
         ("description", "Batch demo"),
         ("gav", "dev.telegraphic:batch:1.0"),
         ("module", "dev.telegraphic.batch"),

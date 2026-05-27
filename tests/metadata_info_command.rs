@@ -36,7 +36,7 @@ fn fixture_script() -> (tempfile::TempDir, std::path::PathBuf) {
 //NATIVE_OPTIONS --no-fallback "--initialize-at-build-time=com.acme.Foo"
 //CDS
 //NOINTEGRATIONS
-//JAVA 21
+//JAVA 25
 //DEPS Helper.java
 //REPOS central=https://repo1.maven.org/maven2
 //SOURCES Extra.java
@@ -106,8 +106,8 @@ fn info_tools_prints_json_and_selects_fields() {
     assert_eq!(json["gav"], "dev.telegraphic:juv-demo:1.2.3");
     assert_eq!(json["module"], "dev.telegraphic.demo");
     assert_eq!(json["description"], "First line\nSecond line");
-    assert_eq!(json["javaVersion"], "21");
-    assert_eq!(json["requestedJavaVersion"], "21");
+    assert_eq!(json["javaVersion"], "25");
+    assert_eq!(json["requestedJavaVersion"], "25");
     assert_eq!(json["dependencies"][0], "Helper.java");
     assert_eq!(json["repositories"][0]["id"], "central");
     assert_eq!(
