@@ -44,6 +44,15 @@ fn jdk_home_returns_path_for_baseline_jdk() {
 }
 
 #[test]
+fn jdk_home_accepts_jbang_plus_version_selector() {
+    let output = juv_output(&["jdk", "home", "25+"]);
+    assert!(
+        output.contains("jdks") || output.contains("jvm") || output.contains("Java"),
+        "jdk home 25+ should resolve like JDK 25, got: {output}"
+    );
+}
+
+#[test]
 fn jdk_home_fails_for_missing_version_without_auto_install() {
     // Version 999 doesn't exist; without auto-install it should fail
     let output = juv_command()
