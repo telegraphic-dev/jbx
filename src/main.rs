@@ -6,10 +6,11 @@ use std::{
 };
 
 use juv::{
-    app_bin_dir, app_install, app_list, app_uninstall, build_java, cache_entries, catalog_aliases,
-    clear_cache, default_cache_dir, export_jar, init_script, resolve_catalog_alias, run_java,
-    split_directive_words, trust_add, trust_clear, trust_entries, trust_remove, AppInstallOptions,
-    BuildOptions, ExportKind, ExportOptions, InitOptions, KeyValue, RunOptions,
+    alias_add, alias_remove, app_bin_dir, app_install, app_list, app_uninstall, build_java,
+    cache_entries, catalog_aliases, clear_cache, default_cache_dir, export_jar, init_script,
+    resolve_catalog_alias, run_java, split_directive_words, trust_add, trust_clear, trust_entries,
+    trust_remove, AliasAddOptions, AliasRemoveOptions, AppInstallOptions, BuildOptions, ExportKind,
+    ExportOptions, InitOptions, KeyValue, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -332,8 +333,109 @@ struct AliasCommand {
 
 #[derive(Subcommand, Debug)]
 enum AliasSubcommand {
+    /// Add alias for a script reference.
+    Add(Box<AliasAddCommand>),
+    /// Remove an existing alias.
+    Remove(AliasRemoveCommand),
     /// List aliases from the nearest jbang-catalog.json.
     List(AliasListCommand),
+}
+
+#[derive(Parser, Debug)]
+struct AliasCatalogOptions {
+    /// Use the global user catalog file (~/.jbang/jbang-catalog.json).
+    #[arg(long = "global", short = 'g')]
+    global: bool,
+
+    /// Path to the catalog file or directory to use.
+    #[arg(long = "file", short = 'f')]
+    file: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct AliasAddCommand {
+    #[command(flatten)]
+    catalog: AliasCatalogOptions,
+
+    /// Alias name (defaults to the script filename stem).
+    #[arg(long = "name")]
+    name: Option<String>,
+
+    /// Description for the alias.
+    #[arg(long = "description")]
+    description: Option<String>,
+
+    /// Force overwrite of an existing alias.
+    #[arg(long = "force")]
+    force: bool,
+
+    /// Additional dependency coordinates, same shape as //DEPS.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
+
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional source file, same shape as //SOURCES.
+    #[arg(long = "source", alias = "sources")]
+    sources: Vec<String>,
+
+    /// Additional file/resource, same shape as //FILES.
+    #[arg(long = "files")]
+    files: Vec<String>,
+
+    /// Additional classpath entries.
+    #[arg(long = "class-path", alias = "cp")]
+    classpath: Vec<PathBuf>,
+
+    /// Additional javac option.
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
+    javac_options: Vec<String>,
+
+    /// Additional java runtime option, same shape as //JAVA_OPTIONS.
+    #[arg(
+        long = "runtime-option",
+        alias = "java-option",
+        allow_hyphen_values = true
+    )]
+    runtime_options: Vec<String>,
+
+    /// Requested Java version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Additional java agent, same shape as //JAVAAGENT.
+    #[arg(long = "javaagent")]
+    java_agents: Vec<String>,
+
+    /// Main class for the alias.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Documentation reference for the alias.
+    #[arg(long = "docs")]
+    docs: Vec<String>,
+
+    /// Script path, URL, or alias reference.
+    script: String,
+
+    /// Arguments stored in the alias and prepended at run time.
+    #[arg(trailing_var_arg = true)]
+    args: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+struct AliasRemoveCommand {
+    #[command(flatten)]
+    catalog: AliasCatalogOptions,
+
+    /// Alias name to remove.
+    name: String,
 }
 
 #[derive(Parser, Debug)]
@@ -1280,6 +1382,49 @@ fn main() -> Result<()> {
             }
         },
         Some(Commands::Alias(cmd)) => match cmd.command {
+            AliasSubcommand::Add(cmd) => {
+                let catalog = alias_add(
+                    AliasAddOptions {
+                        script_ref: cmd.script,
+                        name: cmd.name,
+                        description: cmd.description,
+                        arguments: cmd.args,
+                        deps: split_cli_words(&cmd.deps),
+                        repos: split_cli_words(&cmd.repos),
+                        sources: split_cli_words(&cmd.sources),
+                        files: split_cli_words(&cmd.files),
+                        classpaths: cmd.classpath,
+                        javac_options: cmd.javac_options,
+                        runtime_options: cmd.runtime_options,
+                        java_agents: split_cli_key_values(&cmd.java_agents),
+                        docs: split_cli_key_values(&cmd.docs),
+                        java_version: cmd.java_version,
+                        main_class: cmd.main_class,
+                        force: cmd.force,
+                        catalog_file: cmd.catalog.file,
+                        global: cmd.catalog.global,
+                    },
+                    &std::env::current_dir()?,
+                )?;
+                println!("Alias added to {}", catalog.display());
+                0
+            }
+            AliasSubcommand::Remove(cmd) => {
+                let removed = alias_remove(
+                    AliasRemoveOptions {
+                        name: cmd.name.clone(),
+                        catalog_file: cmd.catalog.file,
+                        global: cmd.catalog.global,
+                    },
+                    &std::env::current_dir()?,
+                )?;
+                if removed {
+                    println!("Alias removed: {}", cmd.name);
+                } else {
+                    println!("Alias '{}' not found.", cmd.name);
+                }
+                0
+            }
             AliasSubcommand::List(cmd) => {
                 print_aliases(cmd.json)?;
                 0
