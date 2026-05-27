@@ -300,10 +300,19 @@ pub fn parse_pom(xml: &str) -> Result<Project> {
     // Apply property substitution
     let substitute = |s: &str, props: &HashMap<String, String>| -> String {
         let mut result = s.to_string();
-        for (key, value) in props {
-            let pattern = format!("${{{key}}}");
-            if result.contains(&pattern) {
-                result = result.replace(&pattern, value);
+        // Repeat until stable to handle chained properties
+        // (e.g. ${jackson.version} → ${jackson.core.version} → 2.17.0)
+        loop {
+            let mut changed = false;
+            for (key, value) in props {
+                let pattern = format!("${{{key}}}");
+                if result.contains(&pattern) {
+                    result = result.replace(&pattern, value);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
             }
         }
         result
@@ -882,10 +891,18 @@ fn resolve_parent_chain_inner(
     // Re-apply property substitution with merged properties
     let substitute = |s: &str, props: &HashMap<String, String>| -> String {
         let mut result = s.to_string();
-        for (key, value) in props {
-            let pattern = format!("${{{key}}}");
-            if result.contains(&pattern) {
-                result = result.replace(&pattern, value);
+        // Repeat until stable to handle chained properties
+        loop {
+            let mut changed = false;
+            for (key, value) in props {
+                let pattern = format!("${{{key}}}");
+                if result.contains(&pattern) {
+                    result = result.replace(&pattern, value);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
             }
         }
         result
@@ -1363,6 +1380,30 @@ mod tests {
 </project>"#;
         let project = parse_pom(xml).unwrap();
         assert_eq!(project.dependencies[0].version, "2.0.13");
+    }
+
+    #[test]
+    fn resolves_chained_properties() {
+        // jackson.version → jackson.core.version → 2.17.0
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <groupId>com.example</groupId>
+  <artifactId>my-app</artifactId>
+  <version>1.0.0</version>
+  <properties>
+    <jackson.version>${jackson.core.version}</jackson.version>
+    <jackson.core.version>2.17.0</jackson.core.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+  </dependencies>
+</project>"#;
+        let project = parse_pom(xml).unwrap();
+        assert_eq!(project.dependencies[0].version, "2.17.0");
     }
 
     #[test]
