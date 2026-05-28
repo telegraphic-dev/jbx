@@ -2235,16 +2235,14 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
 fn stage_publish_source(descriptor: &PublishDescriptor, staging_dir: &Path) -> Result<PathBuf> {
     let source = fs::read_to_string(&descriptor.script)
         .with_context(|| format!("failed to read {}", descriptor.script.display()))?;
-    let has_package = source.lines().any(|line| {
-        let trimmed = line.trim_start();
-        trimmed.starts_with("package ") && trimmed.ends_with(';')
-    });
     let file_name = descriptor
         .script
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("invalid script path: {}", descriptor.script.display()))?;
-    if has_package {
-        let target = staging_dir.join(file_name);
+    if let Some(package_name) = package_name_in_source(&source) {
+        let package_dir = staging_dir.join(package_name.replace('.', "/"));
+        fs::create_dir_all(&package_dir)?;
+        let target = package_dir.join(file_name);
         fs::write(&target, source)?;
         return Ok(target);
     }
@@ -2266,6 +2264,17 @@ fn stage_publish_source(descriptor: &PublishDescriptor, staging_dir: &Path) -> R
     let target = package_dir.join(file_name);
     fs::write(&target, format!("package {package_name};\n\n{source}"))?;
     Ok(target)
+}
+
+fn package_name_in_source(source: &str) -> Option<String> {
+    let package_re = regex::Regex::new(
+        r"(?m)^\s*package\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*;",
+    )
+    .expect("valid package regex");
+    package_re
+        .captures(source)
+        .and_then(|captures| captures.get(1))
+        .map(|package| package.as_str().to_string())
 }
 
 fn looks_like_compact_source(source: &str) -> bool {

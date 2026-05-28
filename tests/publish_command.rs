@@ -25,12 +25,27 @@ fn zip_names(path: &std::path::Path) -> Vec<String> {
 }
 
 fn zip_entry(path: &std::path::Path, name: &str) -> String {
+    let bytes = zip_entry_bytes(path, name);
+    String::from_utf8(bytes).unwrap()
+}
+
+fn zip_entry_bytes(path: &std::path::Path, name: &str) -> Vec<u8> {
     let file = fs::File::open(path).unwrap();
     let mut archive = zip::ZipArchive::new(file).unwrap();
     let mut entry = archive.by_name(name).unwrap();
-    let mut text = String::new();
-    std::io::Read::read_to_string(&mut entry, &mut text).unwrap();
-    text
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut entry, &mut bytes).unwrap();
+    bytes
+}
+
+fn zip_names_from_bytes(bytes: Vec<u8>) -> Vec<String> {
+    let reader = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader).unwrap();
+    let mut names = Vec::new();
+    for i in 0..archive.len() {
+        names.push(archive.by_index(i).unwrap().name().to_string());
+    }
+    names
 }
 
 #[test]
@@ -112,6 +127,14 @@ public class Hello {
     );
 
     let pom = zip_entry(&bundle, &format!("{base}/hello-tool-2.0.0.pom"));
+    let sources_names = zip_names_from_bytes(zip_entry_bytes(
+        &bundle,
+        &format!("{base}/hello-tool-2.0.0-sources.jar"),
+    ));
+    assert!(
+        sources_names.contains(&"dev/telegraphic/demo/hello/Hello.java".to_string()),
+        "{sources_names:?}"
+    );
     assert!(
         pom.contains("<groupId>dev.telegraphic.demo</groupId>"),
         "{pom}"
@@ -221,6 +244,58 @@ fn publish_packages_java_compact_source_files() {
     assert!(
         names.contains(&format!("{base}/compact-1.0.0-sources.jar")),
         "{names:?}"
+    );
+}
+
+#[test]
+fn publish_keeps_sources_jar_paths_matching_existing_package_declaration() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"package dev.telegraphic.demo.packaged;
+
+public class Hello {
+  public static void main(String[] args) {}
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "main": "Hello.java",
+  "group": "dev.telegraphic.demo",
+  "id": "packaged",
+  "version": "1.0.0"
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("packaged-bundle.zip");
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--file")
+        .arg(tmp.path().join("juv.json"))
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let base = "dev/telegraphic/demo/packaged/1.0.0";
+    let sources_names = zip_names_from_bytes(zip_entry_bytes(
+        &bundle,
+        &format!("{base}/packaged-1.0.0-sources.jar"),
+    ));
+    assert!(
+        sources_names.contains(&"dev/telegraphic/demo/packaged/Hello.java".to_string()),
+        "{sources_names:?}"
     );
 }
 
