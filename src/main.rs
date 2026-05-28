@@ -37,6 +37,8 @@ enum Commands {
     Run(RunCommand),
     /// Compile and store script in the cache without running it.
     Build(BuildCommand),
+    /// Check Java source files with javac diagnostics and Error Prone by default.
+    Check(CheckCommand),
     /// Initialize a Java script.
     Init(InitCommand),
     /// Manage compiled script cache.
@@ -193,6 +195,57 @@ struct BuildCommand {
 
     /// Java source file.
     script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct CheckCommand {
+    /// Emit structured diagnostics JSON.
+    #[arg(long = "json")]
+    json: bool,
+
+    /// Disable Error Prone checks and run only javac/-Xlint diagnostics.
+    #[arg(long = "no-error-prone")]
+    no_error_prone: bool,
+
+    /// Error Prone version to use when Error Prone is enabled.
+    #[arg(long = "error-prone-version", default_value = DEFAULT_ERROR_PRONE_VERSION)]
+    error_prone_version: String,
+
+    /// Treat javac and Error Prone warnings as errors.
+    #[arg(long = "warnings-as-errors", alias = "Werror")]
+    warnings_as_errors: bool,
+
+    /// Additional dependency coordinates, same shape as //DEPS.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
+
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional classpath entries.
+    #[arg(long = "class-path", alias = "cp")]
+    classpath: Vec<PathBuf>,
+
+    /// Additional javac option.
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
+    javac_options: Vec<String>,
+
+    /// Override requested Java version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Java source files or directories. Defaults to the current directory.
+    #[arg(default_value = ".")]
+    paths: Vec<PathBuf>,
 }
 
 #[derive(Parser, Debug)]
@@ -1850,6 +1903,285 @@ fn unwrap_compact_source(formatted: &str) -> Result<String> {
 }
 
 const DEFAULT_JUNIT_PLATFORM_VERSION: &str = "6.1.0";
+
+fn run_check(cmd: CheckCommand) -> Result<i32> {
+    let files = collect_java_files(&cmd.paths)?;
+    if files.is_empty() {
+        if cmd.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "ok": true,
+                    "files": [],
+                    "diagnostics": [],
+                    "errorProne": !cmd.no_error_prone,
+                }))?
+            );
+        }
+        return Ok(0);
+    }
+
+    let jdk_root = juv::jdk::resolve_jdk(&cmd.java_version, true)?;
+    let javac = juv::jdk::javac_bin_path(&jdk_root);
+    let java = juv::jdk::java_bin_path(&jdk_root);
+    let root = cache_root(cmd.cache_dir.as_deref())?.join("check");
+    let wrapper_dir = root.join("compiler-wrapper");
+    fs::create_dir_all(&wrapper_dir)?;
+    let wrapper_source = wrapper_dir.join("JuvCheckCompiler.java");
+    let wrapper_class = wrapper_dir.join("JuvCheckCompiler.class");
+    fs::write(&wrapper_source, CHECK_COMPILER_SOURCE)?;
+    let wrapper_needs_compile = !wrapper_class.exists()
+        || fs::metadata(&wrapper_source)?.modified()? > fs::metadata(&wrapper_class)?.modified()?;
+    if wrapper_needs_compile {
+        let status = ProcessCommand::new(&javac)
+            .arg(&wrapper_source)
+            .status()
+            .with_context(|| format!("failed to execute {}", javac.display()))?;
+        if !status.success() {
+            return Err(anyhow::anyhow!(
+                "failed to compile juv check compiler wrapper with exit code {}",
+                status.code().unwrap_or(1)
+            ));
+        }
+    }
+
+    let mut compiler_options = vec!["-Xlint:all".to_string(), "-proc:none".to_string()];
+    let classes_dir = root.join("classes");
+    if classes_dir.exists() {
+        fs::remove_dir_all(&classes_dir)?;
+    }
+    fs::create_dir_all(&classes_dir)?;
+    compiler_options.push("-d".to_string());
+    compiler_options.push(classes_dir.to_string_lossy().to_string());
+
+    let dep_coordinates = split_cli_words(&cmd.deps);
+    let mut classpath = cmd.classpath;
+    if !dep_coordinates.is_empty() {
+        let repos = juvx::maven_repositories(&split_cli_words(&cmd.repos));
+        let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
+        classpath.extend(juv::resolver::resolve_classpath(
+            &dep_coordinates,
+            &repos,
+            &cache_dir,
+        )?);
+    }
+    if !classpath.is_empty() {
+        compiler_options.push("-classpath".to_string());
+        compiler_options.push(
+            std::env::join_paths(&classpath)?
+                .to_string_lossy()
+                .to_string(),
+        );
+    }
+    compiler_options.extend(cmd.javac_options);
+    if cmd.warnings_as_errors {
+        compiler_options.push("-Werror".to_string());
+    }
+
+    let mut wrapper_classpath = vec![wrapper_dir.clone()];
+    if !cmd.no_error_prone {
+        let repos = juvx::maven_repositories(&split_cli_words(&cmd.repos));
+        let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
+        let error_prone_coordinate = format!(
+            "{ERROR_PRONE_GROUP_ID}:{ERROR_PRONE_ARTIFACT_ID}:{}",
+            cmd.error_prone_version
+        );
+        let error_prone_cp =
+            juv::resolver::resolve_classpath(&[error_prone_coordinate], &repos, &cache_dir)?;
+        wrapper_classpath.extend(error_prone_cp);
+        compiler_options.push("-XDcompilePolicy=simple".to_string());
+        compiler_options.push("--should-stop=ifError=FLOW".to_string());
+        compiler_options.push("-Xplugin:ErrorProne".to_string());
+    }
+
+    let output = check_java_command(&java, &wrapper_classpath, &compiler_options, &files)?
+        .output()
+        .with_context(|| format!("failed to execute {}", java.display()))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if cmd.json {
+        print!("{stdout}");
+        if !output.stderr.is_empty() {
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        }
+        return Ok(output.status.code().unwrap_or(1));
+    }
+
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .with_context(|| format!("invalid juv check wrapper output: {stdout}"))?;
+    print_check_human(&payload)?;
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(output.status.code().unwrap_or(1))
+}
+
+fn check_java_command<'a>(
+    java: &'a Path,
+    wrapper_classpath: &'a [PathBuf],
+    compiler_options: &'a [String],
+    files: &'a [PathBuf],
+) -> Result<ProcessCommand> {
+    let mut command = ProcessCommand::new(java);
+    command.args(error_prone_jdk_flags());
+    command.arg("-cp").arg(
+        std::env::join_paths(wrapper_classpath)
+            .context("failed to build juv check compiler wrapper classpath")?,
+    );
+    command.arg("JuvCheckCompiler");
+    command.args(compiler_options);
+    command.arg("--");
+    command.args(files);
+    Ok(command)
+}
+
+fn error_prone_jdk_flags() -> [&'static str; 10] {
+    [
+        "--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
+        "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
+        "--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED",
+        "--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED",
+        "--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
+        "--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED",
+        "--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+        "--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+        "--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
+        "--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED",
+    ]
+}
+
+fn print_check_human(payload: &serde_json::Value) -> Result<()> {
+    let diagnostics = payload
+        .get("diagnostics")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| anyhow::anyhow!("check output did not contain diagnostics array"))?;
+    for diagnostic in diagnostics {
+        let kind = diagnostic
+            .get("kind")
+            .and_then(|value| value.as_str())
+            .unwrap_or("UNKNOWN")
+            .to_ascii_lowercase();
+        let file = diagnostic
+            .get("file")
+            .and_then(|value| value.as_str())
+            .unwrap_or("<compiler>");
+        let line = diagnostic
+            .get("line")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(-1);
+        let column = diagnostic
+            .get("column")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(-1);
+        let message = diagnostic
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if line > 0 && column > 0 {
+            println!("{file}:{line}:{column}: {kind}: {message}");
+        } else {
+            println!("{file}: {kind}: {message}");
+        }
+    }
+    if diagnostics.is_empty() {
+        println!("check passed");
+    }
+    Ok(())
+}
+
+const ERROR_PRONE_GROUP_ID: &str = "com.google.errorprone";
+const ERROR_PRONE_ARTIFACT_ID: &str = "error_prone_core";
+const DEFAULT_ERROR_PRONE_VERSION: &str = "2.39.0";
+
+const CHECK_COMPILER_SOURCE: &str = r#"
+import javax.tools.*;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+
+public class JuvCheckCompiler {
+  public static void main(String[] args) throws Exception {
+    List<String> options = new ArrayList<>();
+    List<String> files = new ArrayList<>();
+    boolean afterSeparator = false;
+    for (String arg : args) {
+      if (arg.equals("--")) {
+        afterSeparator = true;
+      } else if (afterSeparator) {
+        files.add(arg);
+      } else {
+        options.add(arg);
+      }
+    }
+
+    JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+    if (compiler == null) {
+      System.err.println("No system Java compiler available. Run with a JDK, not a JRE.");
+      System.exit(2);
+    }
+
+    DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+    StandardJavaFileManager fm = compiler.getStandardFileManager(diagnostics, Locale.ROOT, StandardCharsets.UTF_8);
+    Iterable<? extends JavaFileObject> units = fm.getJavaFileObjectsFromStrings(files);
+    StringWriter compilerOut = new StringWriter();
+    Boolean ok = compiler.getTask(compilerOut, fm, diagnostics, options, null, units).call();
+
+    StringBuilder sb = new StringBuilder();
+    sb.append("{\n  \"ok\": ").append(Boolean.TRUE.equals(ok)).append(",\n  \"diagnostics\": [\n");
+    List<Diagnostic<? extends JavaFileObject>> ds = diagnostics.getDiagnostics();
+    for (int i = 0; i < ds.size(); i++) {
+      Diagnostic<? extends JavaFileObject> d = ds.get(i);
+      sb.append("    {");
+      field(sb, "kind", d.getKind().toString()); sb.append(",");
+      field(sb, "code", d.getCode()); sb.append(",");
+      field(sb, "file", d.getSource() == null ? null : new File(d.getSource().toUri()).getPath()); sb.append(",");
+      sb.append("\"line\": ").append(d.getLineNumber()).append(",");
+      sb.append("\"column\": ").append(d.getColumnNumber()).append(",");
+      field(sb, "message", d.getMessage(Locale.ROOT));
+      sb.append("}");
+      if (i + 1 < ds.size()) sb.append(",");
+      sb.append("\n");
+    }
+    sb.append("  ],\n");
+    field(sb, "compilerOutput", compilerOut.toString());
+    sb.append("\n}\n");
+    System.out.print(sb);
+    fm.close();
+    System.exit(Boolean.TRUE.equals(ok) ? 0 : 1);
+  }
+
+  private static void field(StringBuilder sb, String name, String value) {
+    sb.append("\"").append(esc(name)).append("\": ");
+    if (value == null) {
+      sb.append("null");
+    } else {
+      sb.append("\"").append(esc(value)).append("\"");
+    }
+  }
+
+  private static String esc(String s) {
+    StringBuilder out = new StringBuilder();
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      switch (c) {
+        case '\\': out.append("\\\\"); break;
+        case '"': out.append("\\\""); break;
+        case '\n': out.append("\\n"); break;
+        case '\r': out.append("\\r"); break;
+        case '\t': out.append("\\t"); break;
+        default:
+          if (c < 0x20) {
+            out.append(String.format("\\u%04x", (int)c));
+          } else {
+            out.append(c);
+          }
+      }
+    }
+    return out.toString();
+  }
+}
+"#;
+
 const JUNIT_GROUP_ID: &str = "org.junit.platform";
 const JUNIT_ARTIFACT_ID: &str = "junit-platform-console-standalone";
 
@@ -2655,6 +2987,7 @@ fn main() -> Result<()> {
             }
             0
         }
+        Some(Commands::Check(cmd)) => run_check(cmd)?,
         Some(Commands::Test(cmd)) => run_tests(cmd)?,
         Some(Commands::Fmt(cmd)) => run_fmt(cmd)?,
         Some(Commands::Juvx(cmd)) => run_juvx(cmd)?,
@@ -2763,7 +3096,7 @@ mod test_command_unit_tests {
             Some(tmp.path()),
             "org.junit.platform",
             "junit-platform-console-standalone",
-            &[repo.clone()],
+            std::slice::from_ref(&repo),
         )
         .unwrap();
         handle.join().unwrap();
