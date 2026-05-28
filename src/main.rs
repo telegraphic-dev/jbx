@@ -1528,6 +1528,12 @@ fn render_docs_markdown(
             if let Some(kind) = ty.get("kind").and_then(|value| value.as_str()) {
                 out.push_str(&format!("Kind: {kind}\n\n"));
             }
+            if let Some(description) = ty.get("description").and_then(|value| value.as_str()) {
+                if !description.is_empty() {
+                    out.push_str(description);
+                    out.push_str("\n\n");
+                }
+            }
         }
     }
     Ok(out)
@@ -1643,6 +1649,7 @@ struct DocsTypeBuilder {
     visibility: String,
     modifiers: Vec<String>,
     annotations: Vec<serde_json::Value>,
+    description: Option<String>,
     extends: Option<String>,
     implements: Vec<String>,
     fields: Vec<serde_json::Value>,
@@ -1668,6 +1675,7 @@ impl DocsTypeBuilder {
             "visibility": self.visibility,
             "modifiers": self.modifiers,
             "annotations": self.annotations,
+            "description": self.description,
             "extends": self.extends,
             "implements": self.implements,
             "fields": self.fields,
@@ -1735,6 +1743,7 @@ fn parse_type_declaration(
         visibility,
         modifiers,
         annotations,
+        description: None,
         extends,
         implements,
         fields: Vec::new(),
@@ -1972,6 +1981,7 @@ fn parse_javadoc_type_page(path: &str, html: &str) -> Option<serde_json::Value> 
         "class"
     };
     let signatures = extract_javadoc_signatures(html);
+    let description = extract_javadoc_type_description(html);
     let mut builder = DocsTypeBuilder {
         kind: kind.to_string(),
         name: name.clone(),
@@ -1980,6 +1990,7 @@ fn parse_javadoc_type_page(path: &str, html: &str) -> Option<serde_json::Value> 
         visibility: "public".to_string(),
         modifiers: vec!["public".to_string()],
         annotations: Vec::new(),
+        description,
         extends: None,
         implements: Vec::new(),
         fields: Vec::new(),
@@ -2017,6 +2028,19 @@ fn extract_javadoc_signatures(html: &str) -> Vec<String> {
         }
     }
     signatures
+}
+
+fn extract_javadoc_type_description(html: &str) -> Option<String> {
+    let patterns = [
+        r#"(?s)<section[^>]*class="[^"]*(?:class|interface|enum|record)-description[^"]*"[^>]*>.*?<div class="block">(.*?)</div>"#,
+        r#"(?s)<div class="description">.*?<div class="block">(.*?)</div>"#,
+    ];
+    patterns.iter().find_map(|pattern| {
+        let re = regex::Regex::new(pattern).ok()?;
+        let html = re.captures(html)?.get(1)?.as_str();
+        let text = normalize_doc_text(&strip_html_tags(html));
+        (!text.is_empty()).then_some(text)
+    })
 }
 
 fn strip_html_tags(input: &str) -> String {
@@ -2124,6 +2148,7 @@ fn parse_javap_type(output: &str) -> Option<serde_json::Value> {
         visibility: parse_visibility(&tokens),
         modifiers: parse_modifiers(&tokens[..kind_index]),
         annotations: Vec::new(),
+        description: None,
         extends: None,
         implements: Vec::new(),
         fields: Vec::new(),
@@ -5764,6 +5789,29 @@ mod test_command_unit_tests {
             Some("[1] display name with spaces")
         );
         assert_eq!(xml_attr(attrs, "classname").as_deref(), Some("ExampleTest"));
+    }
+
+    #[test]
+    fn javadoc_type_description_is_extracted_and_rendered() {
+        let html = r#"
+            <div class="description">
+              <pre>public class <span class="typeNameLabel">Example</span></pre>
+              <div class="block">Example reads and writes JSON.
+                <p>It supports <code>tree</code> values.</div>
+            </div>
+            <div class="member-signature">public void run()</div>
+        "#;
+        let ty = parse_javadoc_type_page("com/example/Example.html", html).unwrap();
+        assert_eq!(
+            ty["description"],
+            "Example reads and writes JSON. It supports tree values."
+        );
+
+        let markdown = render_docs_markdown("example", None, &[], &[ty]).unwrap();
+        assert!(
+            markdown.contains("Example reads and writes JSON. It supports tree values."),
+            "{markdown}"
+        );
     }
 
     #[test]
