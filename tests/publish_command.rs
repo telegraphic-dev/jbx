@@ -57,7 +57,18 @@ fn publish_dry_run_uses_flat_id_metadata_and_version_override() {
         r#"
 public class Hello {
   public static void main(String[] args) {
-    System.out.println("hello");
+    System.out.println(Helper.message());
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("Helper.java"),
+        r#"
+class Helper {
+  static String message() {
+    return "hello";
   }
 }
 "#,
@@ -72,6 +83,15 @@ public class Hello {
   "version": "1.0.0",
   "package": "dev.telegraphic.demo.hello",
   "description": "Hello tool",
+  "url": "https://github.com/telegraphic-dev/hello-tool",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic", "organizationUrl": "https://github.com/telegraphic-dev"}],
+  "scm": {
+    "connection": "scm:git:https://github.com/telegraphic-dev/hello-tool.git",
+    "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/hello-tool.git",
+    "url": "https://github.com/telegraphic-dev/hello-tool"
+  },
+  "sources": ["Helper.java"],
   "dependencies": ["info.picocli:picocli:4.7.7"]
 }
 "#,
@@ -82,6 +102,7 @@ public class Hello {
     let out = juv_command()
         .arg("publish")
         .arg("--dry-run")
+        .arg("--skip-signing")
         .arg("--file")
         .arg(tmp.path().join("juv.json"))
         .arg("--version")
@@ -122,7 +143,19 @@ public class Hello {
         "{names:?}"
     );
     assert!(
+        names.contains(&format!("{base}/hello-tool-2.0.0.pom.md5")),
+        "{names:?}"
+    );
+    assert!(
+        names.contains(&format!("{base}/hello-tool-2.0.0.pom.sha1")),
+        "{names:?}"
+    );
+    assert!(
         names.contains(&format!("{base}/hello-tool-2.0.0.pom.sha256")),
+        "{names:?}"
+    );
+    assert!(
+        names.contains(&format!("{base}/hello-tool-2.0.0.pom.sha512")),
         "{names:?}"
     );
 
@@ -136,6 +169,26 @@ public class Hello {
         "{sources_names:?}"
     );
     assert!(
+        sources_names.contains(&"dev/telegraphic/demo/hello/Helper.java".to_string()),
+        "{sources_names:?}"
+    );
+    let javadoc_names = zip_names_from_bytes(zip_entry_bytes(
+        &bundle,
+        &format!("{base}/hello-tool-2.0.0-javadoc.jar"),
+    ));
+    assert!(
+        javadoc_names
+            .iter()
+            .any(|name| name.ends_with("index.html")),
+        "{javadoc_names:?}"
+    );
+    assert!(
+        javadoc_names
+            .iter()
+            .any(|name| name.ends_with("Hello.html") || name.ends_with("HelloTool.html")),
+        "{javadoc_names:?}"
+    );
+    assert!(
         pom.contains("<groupId>dev.telegraphic.demo</groupId>"),
         "{pom}"
     );
@@ -143,6 +196,22 @@ public class Hello {
     assert!(pom.contains("<version>2.0.0</version>"), "{pom}");
     assert!(
         pom.contains("<description>Hello tool</description>"),
+        "{pom}"
+    );
+    assert!(pom.contains("<packaging>jar</packaging>"), "{pom}");
+    assert!(
+        pom.contains("<url>https://github.com/telegraphic-dev/hello-tool</url>"),
+        "{pom}"
+    );
+    assert!(pom.contains("<licenses>"), "{pom}");
+    assert!(pom.contains("<name>MIT License</name>"), "{pom}");
+    assert!(pom.contains("<developers>"), "{pom}");
+    assert!(pom.contains("<name>Telegraphic</name>"), "{pom}");
+    assert!(pom.contains("<scm>"), "{pom}");
+    assert!(
+        pom.contains(
+            "<connection>scm:git:https://github.com/telegraphic-dev/hello-tool.git</connection>"
+        ),
         "{pom}"
     );
     assert!(pom.contains("<dependencies>"), "{pom}");
@@ -168,7 +237,16 @@ fn publish_target_dir_dot_does_not_delete_unrelated_files() {
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo", "id": "safe", "version": "1.0.0",
-  "package": "dev.telegraphic.demo.safe"
+  "package": "dev.telegraphic.demo.safe",
+  "description": "Test artifact",
+  "url": "https://github.com/telegraphic-dev/test-artifact",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic", "organizationUrl": "https://github.com/telegraphic-dev"}],
+  "scm": {
+    "connection": "scm:git:https://github.com/telegraphic-dev/test-artifact.git",
+    "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/test-artifact.git",
+    "url": "https://github.com/telegraphic-dev/test-artifact"
+  }
 }
 "#,
     )
@@ -178,6 +256,7 @@ fn publish_target_dir_dot_does_not_delete_unrelated_files() {
         .current_dir(tmp.path())
         .arg("publish")
         .arg("--dry-run")
+        .arg("--skip-signing")
         .arg("--file")
         .arg("juv.json")
         .arg("--target-dir")
@@ -213,7 +292,16 @@ fn publish_packages_java_compact_source_files() {
   "group": "dev.telegraphic.demo",
   "id": "compact",
   "version": "1.0.0",
-  "java": "25+"
+  "java": "25+",
+  "description": "Test artifact",
+  "url": "https://github.com/telegraphic-dev/test-artifact",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic", "organizationUrl": "https://github.com/telegraphic-dev"}],
+  "scm": {
+    "connection": "scm:git:https://github.com/telegraphic-dev/test-artifact.git",
+    "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/test-artifact.git",
+    "url": "https://github.com/telegraphic-dev/test-artifact"
+  }
 }
 "#,
     )
@@ -223,6 +311,7 @@ fn publish_packages_java_compact_source_files() {
     let out = juv_command()
         .arg("publish")
         .arg("--dry-run")
+        .arg("--skip-signing")
         .arg("--file")
         .arg(tmp.path().join("juv.json"))
         .arg("--output")
@@ -266,7 +355,16 @@ public class Hello {
   "main": "Hello.java",
   "group": "dev.telegraphic.demo",
   "id": "packaged",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "description": "Test artifact",
+  "url": "https://github.com/telegraphic-dev/test-artifact",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic", "organizationUrl": "https://github.com/telegraphic-dev"}],
+  "scm": {
+    "connection": "scm:git:https://github.com/telegraphic-dev/test-artifact.git",
+    "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/test-artifact.git",
+    "url": "https://github.com/telegraphic-dev/test-artifact"
+  }
 }
 "#,
     )
@@ -276,6 +374,7 @@ public class Hello {
     let out = juv_command()
         .arg("publish")
         .arg("--dry-run")
+        .arg("--skip-signing")
         .arg("--file")
         .arg(tmp.path().join("juv.json"))
         .arg("--output")
@@ -327,6 +426,7 @@ fn publish_rejects_path_unsafe_coordinates() {
         .current_dir(tmp.path())
         .arg("publish")
         .arg("--dry-run")
+        .arg("--skip-signing")
         .arg("--file")
         .arg("juv.json")
         .arg("--target-dir")
@@ -400,6 +500,7 @@ fn publish_requires_flat_group_id_version_metadata() {
     let out = juv_command()
         .arg("publish")
         .arg("--dry-run")
+        .arg("--skip-signing")
         .arg("--file")
         .arg(tmp.path().join("juv.json"))
         .arg("--target-dir")

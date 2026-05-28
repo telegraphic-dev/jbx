@@ -85,7 +85,7 @@ Implemented now:
 - `juv export local` creates runnable JARs whose manifest classpath points at local dependency paths
 - `juv export portable` creates runnable JARs and copies file-based dependency classpath entries into sibling `lib/`
 - `juv export native` compiles scripts then invokes GraalVM `native-image`, passing `//NATIVE_OPTIONS` plus `--native-option` values
-- `juv publish --dry-run` reads `juv.json`, accepts flat `group` / `id` / `version` metadata, supports `--version` overrides, compiles/stages Java sources including compact unnamed-class scripts, and writes a Maven repository-layout Central bundle with main, sources, javadoc-placeholder, POM, and checksum artifacts
+- `juv publish --dry-run` reads `juv.json`, accepts flat `group` / `id` / `version` metadata, supports `--version` overrides, compiles/stages all declared Java sources including compact unnamed-class scripts, and writes a Maven repository-layout Central bundle with main, sources, generated javadoc when possible, POM, and required checksum artifacts
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies
@@ -139,6 +139,24 @@ juv run Hello.java world
   "version": "1.0.0",
   "package": "dev.telegraphic.demo",
   "description": "Small demo tool",
+  "url": "https://github.com/telegraphic-dev/hello-tool",
+  "licenses": [
+    {
+      "name": "MIT License",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  ],
+  "developers": [
+    {
+      "name": "Telegraphic",
+      "organizationUrl": "https://github.com/telegraphic-dev"
+    }
+  ],
+  "scm": {
+    "connection": "scm:git:https://github.com/telegraphic-dev/hello-tool.git",
+    "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/hello-tool.git",
+    "url": "https://github.com/telegraphic-dev/hello-tool"
+  },
   "java": "25",
   "dependencies": [
     "info.picocli:picocli:4.7.7"
@@ -150,11 +168,14 @@ juv run Hello.java world
 ```
 
 ```bash
-juv publish --file juv.json --dry-run
-juv publish --file juv.json --version 1.0.1 --dry-run
+juv publish --file juv.json --dry-run --gpg-key you@example.com
+juv publish --file juv.json --version 1.0.1 --dry-run --gpg-key you@example.com
+juv publish --file juv.json --dry-run --skip-signing  # local inspection only
 ```
 
 Use `--version` when release/tag workflows need to publish a different version than the descriptor.
+
+For GitHub-hosted repositories, `juv publish` can prefill Maven Central POM `url`, `licenses`, `developers`, and `scm` metadata from the `origin` remote plus `gh repo view` when those fields are omitted. Put the fields in `juv.json` when you want explicit release metadata instead of GitHub-derived defaults. Signed Central-ready bundles require a configured GPG key; `--skip-signing` is only for local inspection.
 
 ## Development
 

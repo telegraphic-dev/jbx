@@ -232,6 +232,14 @@ struct PublishCommand {
     #[arg(long = "dry-run", conflicts_with = "publish")]
     dry_run: bool,
 
+    /// Allow unsigned dry-run bundles for local inspection.
+    #[arg(long = "skip-signing")]
+    skip_signing: bool,
+
+    /// GPG key ID/email to use for detached ASCII signatures.
+    #[arg(long = "gpg-key")]
+    gpg_key: Option<String>,
+
     /// Upload/publish to Maven Central. Not enabled until Central API support lands.
     #[arg(long = "publish")]
     publish: bool,
@@ -1950,13 +1958,40 @@ struct PublishCoordinates {
 }
 
 #[derive(Debug, Clone)]
+struct PublishLicense {
+    name: String,
+    url: String,
+}
+
+#[derive(Debug, Clone)]
+struct PublishDeveloper {
+    name: String,
+    email: Option<String>,
+    organization: Option<String>,
+    organization_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PublishScm {
+    connection: String,
+    developer_connection: Option<String>,
+    url: String,
+}
+
+#[derive(Debug, Clone)]
 struct PublishDescriptor {
     script: PathBuf,
     coordinates: PublishCoordinates,
     package_name: Option<String>,
+    name: Option<String>,
     description: Option<String>,
+    url: Option<String>,
+    licenses: Vec<PublishLicense>,
+    developers: Vec<PublishDeveloper>,
+    scm: Option<PublishScm>,
     java_version: Option<String>,
     deps: Vec<String>,
+    sources: Vec<String>,
     repos: Vec<String>,
 }
 
@@ -1990,9 +2025,15 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     let mut script = cmd.script.clone();
     let mut coordinates = None;
     let mut package_name = None;
+    let mut name = None;
     let mut description = None;
+    let mut url = None;
+    let mut licenses = Vec::new();
+    let mut developers = Vec::new();
+    let mut scm = None;
     let mut java_version = None;
     let mut deps = Vec::new();
+    let mut sources = Vec::new();
     let mut repos = Vec::new();
 
     if let Some(path) = descriptor_path {
@@ -2014,15 +2055,27 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
             .get("package")
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned);
+        name = json
+            .get("name")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned);
         description = json
             .get("description")
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned);
+        url = json
+            .get("url")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned);
+        licenses = parse_descriptor_licenses(&json)?;
+        developers = parse_descriptor_developers(&json)?;
+        scm = parse_descriptor_scm(&json)?;
         java_version = json
             .get("java")
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned);
         deps = string_array(&json, "dependencies")?;
+        sources = string_array(&json, "sources")?;
         repos = string_array(&json, "repositories")?;
     }
 
@@ -2037,11 +2090,35 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     if description.is_none() {
         description = directives.description.clone();
     }
+    let github = infer_github_publish_metadata();
+    if url.is_none() {
+        url = github.as_ref().and_then(|metadata| metadata.url.clone());
+    }
+    if licenses.is_empty() {
+        licenses = github
+            .as_ref()
+            .and_then(|metadata| metadata.license.clone())
+            .into_iter()
+            .collect();
+    }
+    if developers.is_empty() {
+        developers = github
+            .as_ref()
+            .and_then(|metadata| metadata.developer.clone())
+            .into_iter()
+            .collect();
+    }
+    if scm.is_none() {
+        scm = github.and_then(|metadata| metadata.scm);
+    }
     if java_version.is_none() {
         java_version = directives.java_version.clone();
     }
     if deps.is_empty() {
         deps = directives.deps.clone();
+    }
+    if sources.is_empty() {
+        sources = directives.sources.clone();
     }
     if repos.is_empty() {
         repos = directives.repos.clone();
@@ -2060,13 +2137,36 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     if let Some(package_name) = package_name.as_deref() {
         validate_package_name(package_name)?;
     }
+    let name = name.or_else(|| Some(format!("{}:{}", coordinates.group, coordinates.id)));
+    if coordinates.version.ends_with("-SNAPSHOT") {
+        anyhow::bail!("Maven Central does not accept -SNAPSHOT versions");
+    }
+    if description.is_none() {
+        description = Some(format!("{} published with juv", coordinates.id));
+    }
+    require_publish_metadata("url", url.as_deref())?;
+    if licenses.is_empty() {
+        anyhow::bail!("publish requires at least one license for Maven Central metadata");
+    }
+    if developers.is_empty() {
+        anyhow::bail!("publish requires at least one developer for Maven Central metadata");
+    }
+    if scm.is_none() {
+        anyhow::bail!("publish requires scm metadata for Maven Central");
+    }
     Ok(PublishDescriptor {
         script,
         coordinates,
         package_name,
+        name,
         description,
+        url,
+        licenses,
+        developers,
+        scm,
         java_version,
         deps,
+        sources,
         repos,
     })
 }
@@ -2113,6 +2213,172 @@ fn string_array(json: &serde_json::Value, name: &str) -> Result<Vec<String>> {
                 .ok_or_else(|| anyhow::anyhow!("{name} must be an array of strings"))
         })
         .collect()
+}
+
+fn required_object_string(object: &serde_json::Value, name: &str) -> Result<String> {
+    object
+        .get(name)
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("{name} is required"))
+}
+
+fn optional_object_string(object: &serde_json::Value, name: &str) -> Option<String> {
+    object
+        .get(name)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn parse_descriptor_licenses(json: &serde_json::Value) -> Result<Vec<PublishLicense>> {
+    let Some(value) = json.get("licenses") else {
+        return Ok(Vec::new());
+    };
+    let array = value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("licenses must be an array of objects"))?;
+    array
+        .iter()
+        .map(|license| {
+            Ok(PublishLicense {
+                name: required_object_string(license, "name")?,
+                url: required_object_string(license, "url")?,
+            })
+        })
+        .collect()
+}
+
+fn parse_descriptor_developers(json: &serde_json::Value) -> Result<Vec<PublishDeveloper>> {
+    let Some(value) = json.get("developers") else {
+        return Ok(Vec::new());
+    };
+    let array = value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("developers must be an array of objects"))?;
+    array
+        .iter()
+        .map(|developer| {
+            Ok(PublishDeveloper {
+                name: required_object_string(developer, "name")?,
+                email: optional_object_string(developer, "email"),
+                organization: optional_object_string(developer, "organization"),
+                organization_url: optional_object_string(developer, "organizationUrl"),
+            })
+        })
+        .collect()
+}
+
+fn parse_descriptor_scm(json: &serde_json::Value) -> Result<Option<PublishScm>> {
+    let Some(value) = json.get("scm") else {
+        return Ok(None);
+    };
+    Ok(Some(PublishScm {
+        connection: required_object_string(value, "connection")?,
+        developer_connection: optional_object_string(value, "developerConnection"),
+        url: required_object_string(value, "url")?,
+    }))
+}
+
+fn require_publish_metadata(name: &str, value: Option<&str>) -> Result<()> {
+    if value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        anyhow::bail!("publish requires {name} for Maven Central metadata");
+    }
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+struct InferredPublishMetadata {
+    url: Option<String>,
+    license: Option<PublishLicense>,
+    developer: Option<PublishDeveloper>,
+    scm: Option<PublishScm>,
+}
+
+fn infer_github_publish_metadata() -> Option<InferredPublishMetadata> {
+    let remote = ProcessCommand::new("git")
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())?;
+    let repo = github_repo_slug(remote.trim())?;
+    let mut metadata = InferredPublishMetadata {
+        url: Some(format!("https://github.com/{repo}")),
+        scm: Some(PublishScm {
+            connection: format!("scm:git:https://github.com/{repo}.git"),
+            developer_connection: Some(format!("scm:git:ssh://git@github.com/{repo}.git")),
+            url: format!("https://github.com/{repo}"),
+        }),
+        ..InferredPublishMetadata::default()
+    };
+    if let Some(json) = gh_repo_view(&repo) {
+        metadata.url = json
+            .get("url")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned)
+            .or(metadata.url);
+        metadata.license = json.get("licenseInfo").and_then(github_license_from_json);
+        metadata.developer = json.get("owner").and_then(github_developer_from_owner);
+    }
+    Some(metadata)
+}
+
+fn github_repo_slug(remote: &str) -> Option<String> {
+    let without_suffix = remote.strip_suffix(".git").unwrap_or(remote);
+    if let Some(rest) = without_suffix.strip_prefix("git@github.com:") {
+        return Some(rest.to_string());
+    }
+    without_suffix
+        .strip_prefix("https://github.com/")
+        .map(ToOwned::to_owned)
+}
+
+fn gh_repo_view(repo: &str) -> Option<serde_json::Value> {
+    let output = ProcessCommand::new("gh")
+        .args(["repo", "view", repo, "--json", "url,licenseInfo,owner"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&output.stdout).ok()
+}
+
+fn github_license_from_json(value: &serde_json::Value) -> Option<PublishLicense> {
+    let name = value
+        .get("name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())?;
+    let spdx = value
+        .get("spdxId")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty());
+    Some(PublishLicense {
+        name: name.to_string(),
+        url: spdx
+            .map(|spdx| format!("https://spdx.org/licenses/{spdx}.html"))
+            .unwrap_or_else(|| "https://opensource.org/licenses".to_string()),
+    })
+}
+
+fn github_developer_from_owner(value: &serde_json::Value) -> Option<PublishDeveloper> {
+    let login = value
+        .get("login")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())?;
+    Some(PublishDeveloper {
+        name: login.to_string(),
+        email: None,
+        organization: None,
+        organization_url: Some(format!("https://github.com/{login}")),
+    })
 }
 
 fn validate_group(value: &str) -> Result<()> {
@@ -2180,12 +2446,12 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
     fs::create_dir_all(&staging_dir)?;
     fs::create_dir_all(&repo_dir)?;
 
-    let staged_script = stage_publish_source(descriptor, &staging_dir)?;
+    let staged = stage_publish_sources(descriptor, &staging_dir)?;
     let build = build_java(BuildOptions {
-        script: staged_script.clone(),
+        script: staged.script.clone(),
         extra_deps: descriptor.deps.clone(),
         extra_repos: descriptor.repos.clone(),
-        extra_sources: Vec::new(),
+        extra_sources: staged.extra_sources.clone(),
         extra_files: Vec::new(),
         classpath: Vec::new(),
         javac_options: Vec::new(),
@@ -2211,15 +2477,20 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
     let sources_jar = artifact_dir.join(format!("{prefix}-sources.jar"));
     write_directory_jar(&staging_dir, &sources_jar)?;
     let javadoc_jar = artifact_dir.join(format!("{prefix}-javadoc.jar"));
-    write_text_jar(
+    write_javadoc_jar(
+        descriptor,
+        &staged.all_sources,
+        &build.classpath,
+        &target_dir,
         &javadoc_jar,
-        "README.txt",
-        "Javadoc generation is not implemented yet; this placeholder keeps the Maven Central artifact set complete for dry runs.\n",
     )?;
     let pom = artifact_dir.join(format!("{prefix}.pom"));
     fs::write(&pom, render_pom(descriptor)?)?;
     for file in [&jar, &sources_jar, &javadoc_jar, &pom] {
         write_checksums(file)?;
+        if !cmd.skip_signing {
+            write_gpg_signature(file, cmd.gpg_key.as_deref())?;
+        }
     }
     let bundle = cmd
         .output
@@ -2232,13 +2503,44 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
     Ok(bundle)
 }
 
-fn stage_publish_source(descriptor: &PublishDescriptor, staging_dir: &Path) -> Result<PathBuf> {
-    let source = fs::read_to_string(&descriptor.script)
-        .with_context(|| format!("failed to read {}", descriptor.script.display()))?;
-    let file_name = descriptor
-        .script
+struct StagedPublishSources {
+    script: PathBuf,
+    extra_sources: Vec<String>,
+    all_sources: Vec<PathBuf>,
+}
+
+fn stage_publish_sources(
+    descriptor: &PublishDescriptor,
+    staging_dir: &Path,
+) -> Result<StagedPublishSources> {
+    let script = stage_publish_source_file(&descriptor.script, descriptor, staging_dir)?;
+    let base_dir = descriptor.script.parent().unwrap_or_else(|| Path::new("."));
+    let mut extra_sources = Vec::new();
+    let mut all_sources = vec![script.clone()];
+    for source in &descriptor.sources {
+        let staged = stage_publish_source_file(&base_dir.join(source), descriptor, staging_dir)
+            .with_context(|| format!("failed to stage source {source}"))?;
+        let absolute = staged.to_string_lossy().to_string();
+        extra_sources.push(absolute);
+        all_sources.push(staged);
+    }
+    Ok(StagedPublishSources {
+        script,
+        extra_sources,
+        all_sources,
+    })
+}
+
+fn stage_publish_source_file(
+    source_path: &Path,
+    descriptor: &PublishDescriptor,
+    staging_dir: &Path,
+) -> Result<PathBuf> {
+    let source = fs::read_to_string(source_path)
+        .with_context(|| format!("failed to read {}", source_path.display()))?;
+    let file_name = source_path
         .file_name()
-        .ok_or_else(|| anyhow::anyhow!("invalid script path: {}", descriptor.script.display()))?;
+        .ok_or_else(|| anyhow::anyhow!("invalid source path: {}", source_path.display()))?;
     if let Some(package_name) = package_name_in_source(&source) {
         let package_dir = staging_dir.join(package_name.replace('.', "/"));
         fs::create_dir_all(&package_dir)?;
@@ -2287,11 +2589,27 @@ fn looks_like_compact_source(source: &str) -> bool {
 }
 
 fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
+    let name = descriptor
+        .name
+        .as_deref()
+        .unwrap_or(&descriptor.coordinates.id);
     let description = descriptor
         .description
         .as_deref()
-        .unwrap_or("Published with juv");
+        .expect("publish metadata was validated");
+    let url = descriptor
+        .url
+        .as_deref()
+        .expect("publish metadata was validated");
     let dependencies = render_pom_dependencies(&descriptor.deps)?;
+    let licenses = render_pom_licenses(&descriptor.licenses);
+    let developers = render_pom_developers(&descriptor.developers);
+    let scm = render_pom_scm(
+        descriptor
+            .scm
+            .as_ref()
+            .expect("publish metadata was validated"),
+    );
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -2299,17 +2617,84 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
   <groupId>{}</groupId>
   <artifactId>{}</artifactId>
   <version>{}</version>
+  <packaging>jar</packaging>
   <name>{}</name>
-  <description>{}</description>{}
+  <description>{}</description>
+  <url>{}</url>{}{}{}{}
 </project>
 "#,
         xml_escape(&descriptor.coordinates.group),
         xml_escape(&descriptor.coordinates.id),
         xml_escape(&descriptor.coordinates.version),
-        xml_escape(&descriptor.coordinates.id),
+        xml_escape(name),
         xml_escape(description),
+        xml_escape(url),
+        licenses,
+        developers,
+        scm,
         dependencies
     ))
+}
+
+fn render_pom_licenses(licenses: &[PublishLicense]) -> String {
+    let mut out = String::from("\n  <licenses>");
+    for license in licenses {
+        out.push_str("\n    <license>");
+        out.push_str(&format!(
+            "\n      <name>{}</name>",
+            xml_escape(&license.name)
+        ));
+        out.push_str(&format!("\n      <url>{}</url>", xml_escape(&license.url)));
+        out.push_str("\n    </license>");
+    }
+    out.push_str("\n  </licenses>");
+    out
+}
+
+fn render_pom_developers(developers: &[PublishDeveloper]) -> String {
+    let mut out = String::from("\n  <developers>");
+    for developer in developers {
+        out.push_str("\n    <developer>");
+        out.push_str(&format!(
+            "\n      <name>{}</name>",
+            xml_escape(&developer.name)
+        ));
+        if let Some(email) = developer.email.as_deref() {
+            out.push_str(&format!("\n      <email>{}</email>", xml_escape(email)));
+        }
+        if let Some(organization) = developer.organization.as_deref() {
+            out.push_str(&format!(
+                "\n      <organization>{}</organization>",
+                xml_escape(organization)
+            ));
+        }
+        if let Some(organization_url) = developer.organization_url.as_deref() {
+            out.push_str(&format!(
+                "\n      <organizationUrl>{}</organizationUrl>",
+                xml_escape(organization_url)
+            ));
+        }
+        out.push_str("\n    </developer>");
+    }
+    out.push_str("\n  </developers>");
+    out
+}
+
+fn render_pom_scm(scm: &PublishScm) -> String {
+    let mut out = String::from("\n  <scm>");
+    out.push_str(&format!(
+        "\n    <connection>{}</connection>",
+        xml_escape(&scm.connection)
+    ));
+    if let Some(developer_connection) = scm.developer_connection.as_deref() {
+        out.push_str(&format!(
+            "\n    <developerConnection>{}</developerConnection>",
+            xml_escape(developer_connection)
+        ));
+    }
+    out.push_str(&format!("\n    <url>{}</url>", xml_escape(&scm.url)));
+    out.push_str("\n  </scm>");
+    out
 }
 
 fn render_pom_dependencies(deps: &[String]) -> Result<String> {
@@ -2389,8 +2774,75 @@ fn write_text_jar(path: &Path, name: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
+fn publish_join_classpath(paths: &[PathBuf]) -> String {
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    paths
+        .iter()
+        .map(|path| path.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
+fn write_javadoc_jar(
+    descriptor: &PublishDescriptor,
+    sources: &[PathBuf],
+    classpath: &[PathBuf],
+    target_dir: &Path,
+    jar: &Path,
+) -> Result<()> {
+    let javadoc_dir = target_dir.join("javadoc");
+    if javadoc_dir.exists() {
+        fs::remove_dir_all(&javadoc_dir)?;
+    }
+    fs::create_dir_all(&javadoc_dir)?;
+
+    let compact_sources = sources
+        .iter()
+        .map(fs::read_to_string)
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .any(|source| looks_like_compact_source(&source));
+    if compact_sources {
+        write_text_jar(
+            jar,
+            "README.txt",
+            "Javadoc is not generated for Java compact/unnamed-class source files yet.\n",
+        )?;
+        return Ok(());
+    }
+
+    let jdk_root = juv::jdk::resolve_jdk(&descriptor.java_version, true)?;
+    let javadoc = juv::jdk::javadoc_bin_path(&jdk_root);
+    let mut cmd = ProcessCommand::new(&javadoc);
+    cmd.arg("-quiet")
+        .arg("-d")
+        .arg(&javadoc_dir)
+        .arg("-sourcepath")
+        .arg(target_dir.join("staging"));
+    if !classpath.is_empty() {
+        cmd.arg("-classpath").arg(publish_join_classpath(classpath));
+    }
+    cmd.args(sources);
+    let status = cmd
+        .status()
+        .with_context(|| format!("failed to execute {}", javadoc.display()))?;
+    if !status.success() {
+        anyhow::bail!(
+            "javadoc failed with exit code {}",
+            status.code().unwrap_or(1)
+        );
+    }
+    write_directory_jar(&javadoc_dir, jar)
+}
+
 fn write_checksums(path: &Path) -> Result<()> {
     let bytes = fs::read(path)?;
+    let md5 = {
+        use md5::Digest;
+        let mut hasher = md5::Md5::new();
+        hasher.update(&bytes);
+        format!("{:x}", hasher.finalize())
+    };
     let sha1 = {
         use sha1::Digest;
         let mut hasher = sha1::Sha1::new();
@@ -2403,6 +2855,16 @@ fn write_checksums(path: &Path) -> Result<()> {
         hasher.update(&bytes);
         format!("{:x}", hasher.finalize())
     };
+    let sha512 = {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha512::new();
+        hasher.update(&bytes);
+        format!("{:x}", hasher.finalize())
+    };
+    fs::write(
+        path.with_extension(format!("{}md5", extension_with_dot(path))),
+        md5,
+    )?;
     fs::write(
         path.with_extension(format!("{}sha1", extension_with_dot(path))),
         sha1,
@@ -2411,6 +2873,36 @@ fn write_checksums(path: &Path) -> Result<()> {
         path.with_extension(format!("{}sha256", extension_with_dot(path))),
         sha256,
     )?;
+    fs::write(
+        path.with_extension(format!("{}sha512", extension_with_dot(path))),
+        sha512,
+    )?;
+    Ok(())
+}
+
+fn write_gpg_signature(path: &Path, gpg_key: Option<&str>) -> Result<()> {
+    let signature = path.with_extension(format!("{}asc", extension_with_dot(path)));
+    let mut cmd = ProcessCommand::new("gpg");
+    cmd.arg("--batch")
+        .arg("--yes")
+        .arg("--armor")
+        .arg("--detach-sign")
+        .arg("--output")
+        .arg(&signature);
+    if let Some(key) = gpg_key {
+        cmd.arg("--local-user").arg(key);
+    }
+    cmd.arg(path);
+    let output = cmd
+        .output()
+        .with_context(|| "failed to execute gpg for Maven Central signatures")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "gpg signing failed for {}; configure a signing key, pass --gpg-key, or use --skip-signing for unsigned dry-run inspection: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
     Ok(())
 }
 
