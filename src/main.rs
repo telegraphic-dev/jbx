@@ -2151,11 +2151,14 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
         .target_dir
         .clone()
         .unwrap_or_else(|| PathBuf::from("target/juv-publish"));
-    if target_dir.exists() {
-        fs::remove_dir_all(&target_dir)?;
-    }
     let staging_dir = target_dir.join("staging");
     let repo_dir = target_dir.join("repository");
+    if staging_dir.exists() {
+        fs::remove_dir_all(&staging_dir)?;
+    }
+    if repo_dir.exists() {
+        fs::remove_dir_all(&repo_dir)?;
+    }
     fs::create_dir_all(&staging_dir)?;
     fs::create_dir_all(&repo_dir)?;
 

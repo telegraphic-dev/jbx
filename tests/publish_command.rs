@@ -124,6 +124,53 @@ public class Hello {
 }
 
 #[test]
+fn publish_target_dir_dot_does_not_delete_unrelated_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("keep.txt"), "do not delete").unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"public class Hello {
+  public static void main(String[] args) {}
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "main": "Hello.java",
+  "gav": { "group": "dev.telegraphic.demo", "artifact": "safe", "version": "1.0.0" },
+  "package": "dev.telegraphic.demo.safe"
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .current_dir(tmp.path())
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--file")
+        .arg("juv.json")
+        .arg("--target-dir")
+        .arg(".")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("keep.txt")).unwrap(),
+        "do not delete"
+    );
+    assert!(tmp
+        .path()
+        .join("repository/dev/telegraphic/demo/safe/1.0.0/safe-1.0.0.pom")
+        .exists());
+}
+
+#[test]
 fn publish_requires_structured_gav_metadata() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("Hello.java"), "void main() {}\n").unwrap();
