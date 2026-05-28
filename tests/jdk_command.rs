@@ -1,7 +1,7 @@
 use std::process::Command;
 
 fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
 fn juv_output(args: &[&str]) -> String {

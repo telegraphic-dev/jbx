@@ -314,7 +314,7 @@ fn init_template(template: Option<&str>) -> Result<InitTemplate> {
 pub fn default_cache_dir() -> Result<PathBuf> {
     Ok(dirs::cache_dir()
         .ok_or_else(|| anyhow!("could not determine cache directory"))?
-        .join("juv"))
+        .join("jbx"))
 }
 
 pub fn clear_cache(cache_dir: Option<&Path>) -> Result<()> {
@@ -1145,9 +1145,9 @@ public class {base_name} {{
     }}
 
     public static void main(String[] args) {{
-        System.out.println("This is a juv javaagent.\n" +
+        System.out.println("This is a jbx javaagent.\n" +
                            "Usage: \n" +
-                           "   juv run --javaagent={base_name}.java yourApp.java");
+                           "   jbx run --javaagent={base_name}.java yourApp.java");
     }}
 
     public static class ClassLogger implements ClassFileTransformer {{
@@ -1352,7 +1352,7 @@ fn materialize_script(
             cache_dir,
         )? {
             return Err(anyhow!(
-                "remote script {} is not trusted; run `juv trust add {}` or pass `juv run --trust {}`",
+                "remote script {} is not trusted; run `jbx trust add {}` or pass `jbx run --trust {}`",
                 script_text,
                 script_text,
                 script_text
@@ -2468,8 +2468,8 @@ fn shell_quote_path(path: &Path) -> String {
 
 fn parse_wrapper_target(wrapper: &Path) -> Option<String> {
     let content = fs::read_to_string(wrapper).ok()?;
-    // Wrapper line looks like: exec /path/to/juv run -- /path/to/script.java "$@"
-    // Or with quoting:          exec /path/to/juv run -- '/path/with spaces/script.java' "$@"
+    // Wrapper line looks like: exec /path/to/jbx run -- /path/to/script.java "$@"
+    // Or with quoting:          exec /path/to/jbx run -- '/path/with spaces/script.java' "$@"
     for line in content.lines() {
         if let Some(rest) = line.strip_prefix("exec ") {
             if let Some(idx) = rest.find(" run -- ") {

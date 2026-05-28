@@ -2,7 +2,7 @@
 //!
 //! Discovery probes standard JDK locations (JAVA_HOME, PATH, JBang, SDKMAN,
 //! mise, Gradle, system dirs) and symlinks found JDKs into
-//! `~/.cache/juv/jdks/<major>/` for fast future lookups.
+//! `~/.cache/jbx/jdks/<major>/` for fast future lookups.
 //!
 //! If no matching JDK is found, it can be auto-provisioned from the Adoptium
 //! (Eclipse Temurin) API.
@@ -626,7 +626,7 @@ fn detect_platform() -> anyhow::Result<(&'static str, &'static str)> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// The juv JDK cache directory: ~/.cache/juv/jdks/
+/// The jbx JDK cache directory: ~/.cache/jbx/jdks/
 fn jdk_cache_dir() -> anyhow::Result<PathBuf> {
     let cache = dirs::cache_dir().ok_or_else(|| anyhow!("cannot determine cache directory"))?;
     Ok(cache.join("juv").join("jdks"))

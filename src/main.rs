@@ -19,15 +19,31 @@ use juv::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "juv", version, about = "juv: a Rust port of JBang")]
+#[command(
+    name = "jbx",
+    version,
+    about = "jbx: one-stop Java toolbox for scripts, tools, and agents"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Script to run when no subcommand is given, JBang-style.
+    /// Additional repository for Maven executable shorthand (id=url format or bare URL).
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Override dependency cache directory for Maven executable shorthand.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Main class for Maven executable shorthand instead of java -jar.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Script to run, or Maven coordinates to launch as a Java tool.
     script: Option<PathBuf>,
 
-    /// Arguments passed to the script when no subcommand is given.
+    /// Arguments passed to the script/tool when no subcommand is given.
     #[arg(trailing_var_arg = true)]
     args: Vec<String>,
 }
@@ -202,14 +218,14 @@ struct BuildCommand {
 
 #[derive(Parser, Debug)]
 struct PublishCommand {
-    /// Java source file to publish. Defaults to juv.json main when --file is used.
+    /// Java source file to publish. Defaults to jbx.json or juv.json main when --file is used.
     script: Option<PathBuf>,
 
-    /// juv descriptor file. Defaults to ./juv.json when present.
+    /// jbx descriptor file. Defaults to ./jbx.json, then ./juv.json, when present.
     #[arg(long = "file")]
     file: Option<PathBuf>,
 
-    /// Override version from juv.json or //GAV.
+    /// Override version from jbx.json, juv.json, or //GAV.
     #[arg(long = "version")]
     version: Option<String>,
 
@@ -2304,10 +2320,9 @@ fn url_encode(value: &str) -> String {
 fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     let descriptor_path = match &cmd.file {
         Some(path) => Some(path.clone()),
-        None => {
-            let candidate = PathBuf::from("juv.json");
-            candidate.exists().then_some(candidate)
-        }
+        None => [PathBuf::from("jbx.json"), PathBuf::from("juv.json")]
+            .into_iter()
+            .find(|candidate| candidate.exists()),
     };
 
     let mut script = cmd.script.clone();
@@ -2371,8 +2386,8 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         repos = string_array(&json, "repositories")?;
     }
 
-    let script =
-        script.ok_or_else(|| anyhow::anyhow!("publish requires a script or juv.json main"))?;
+    let script = script
+        .ok_or_else(|| anyhow::anyhow!("publish requires a script or jbx.json/juv.json main"))?;
     if !script.exists() {
         anyhow::bail!(
             "publish main source not found: {}{}",
@@ -2768,7 +2783,7 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
     let target_dir = cmd
         .target_dir
         .clone()
-        .unwrap_or_else(|| PathBuf::from("target/juv-publish"));
+        .unwrap_or_else(|| PathBuf::from("target/jbx-publish"));
     let staging_dir = target_dir.join("staging");
     let repo_dir = target_dir.join("repository");
     if staging_dir.exists() {
@@ -3384,7 +3399,7 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
             .with_context(|| format!("failed to execute {}", javac.display()))?;
         if !status.success() {
             return Err(anyhow::anyhow!(
-                "failed to compile juv check compiler wrapper with exit code {}",
+                "failed to compile jbx check compiler wrapper with exit code {}",
                 status.code().unwrap_or(1)
             ));
         }
@@ -3469,7 +3484,7 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     }
 
     let payload: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .with_context(|| format!("invalid juv check wrapper output: {stdout}"))?;
+        .with_context(|| format!("invalid jbx check wrapper output: {stdout}"))?;
     print_check_human(&payload)?;
     if !output.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
@@ -3487,7 +3502,7 @@ fn check_java_command<'a>(
     command.args(error_prone_jdk_flags());
     command.arg("-cp").arg(
         std::env::join_paths(wrapper_classpath)
-            .context("failed to build juv check compiler wrapper classpath")?,
+            .context("failed to build jbx check compiler wrapper classpath")?,
     );
     command.arg("JuvCheckCompiler");
     command.args(compiler_options);
@@ -4000,6 +4015,18 @@ fn dedupe_strings(values: &mut Vec<String>) {
     values.retain(|value| seen.insert(value.clone()));
 }
 
+fn should_run_as_maven_tool_shorthand(script: &Path) -> bool {
+    if script.exists() {
+        return false;
+    }
+    let value = script.to_string_lossy();
+    if value.starts_with("http://") || value.starts_with("https://") {
+        return false;
+    }
+    let parts: Vec<&str> = value.split(':').collect();
+    matches!(parts.len(), 2..=4) && parts.iter().all(|part| !part.is_empty())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let code = match cli.command {
@@ -4492,25 +4519,35 @@ fn main() -> Result<()> {
         },
         None => {
             let Some(script) = cli.script else {
-                eprintln!("No script specified. Try: juv run Hello.java");
+                eprintln!("No script or Maven coordinate specified. Try: jbx run Hello.java");
                 std::process::exit(2);
             };
-            run_java(apply_alias_to_run(RunOptions {
-                script,
-                script_args: cli.args,
-                extra_deps: Vec::new(),
-                extra_repos: Vec::new(),
-                extra_sources: Vec::new(),
-                extra_files: Vec::new(),
-                classpath: Vec::new(),
-                javac_options: Vec::new(),
-                runtime_options: Vec::new(),
-                java_agents: Vec::new(),
-                java_version: None,
-                main_class: None,
-                cache_dir: None,
-                trust_remote: false,
-            })?)?
+            if should_run_as_maven_tool_shorthand(&script) {
+                juvx::run(juvx::JuvxOptions {
+                    coordinate: script.to_string_lossy().into_owned(),
+                    repos: cli.repos,
+                    cache_dir: cli.cache_dir,
+                    main_class: cli.main_class,
+                    args: cli.args,
+                })?
+            } else {
+                run_java(apply_alias_to_run(RunOptions {
+                    script,
+                    script_args: cli.args,
+                    extra_deps: Vec::new(),
+                    extra_repos: Vec::new(),
+                    extra_sources: Vec::new(),
+                    extra_files: Vec::new(),
+                    classpath: Vec::new(),
+                    javac_options: Vec::new(),
+                    runtime_options: Vec::new(),
+                    java_agents: Vec::new(),
+                    java_version: None,
+                    main_class: None,
+                    cache_dir: None,
+                    trust_remote: false,
+                })?)?
+            }
         }
     };
     std::process::exit(code);

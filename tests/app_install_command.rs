@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn juv() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_juv"))
+    PathBuf::from(env!("CARGO_BIN_EXE_jbx"))
 }
 
 // Use a custom bin dir to avoid polluting the user's actual PATH.

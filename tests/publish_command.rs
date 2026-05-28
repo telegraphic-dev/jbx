@@ -5,7 +5,7 @@ use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 
 fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
 fn assert_success(out: &Output) {
@@ -221,6 +221,65 @@ class Helper {
     assert!(pom.contains("<groupId>info.picocli</groupId>"), "{pom}");
     assert!(pom.contains("<artifactId>picocli</artifactId>"), "{pom}");
     assert!(pom.contains("<version>4.7.7</version>"), "{pom}");
+}
+
+#[test]
+fn publish_defaults_to_jbx_json_descriptor() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"public class Hello {
+  public static void main(String[] args) {
+    System.out.println("hello jbx");
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbx.json"),
+        r#"{
+  "main": "Hello.java",
+  "group": "dev.telegraphic.demo",
+  "id": "jbx-tool",
+  "version": "1.0.0",
+  "package": "dev.telegraphic.demo.jbx",
+  "description": "JBX tool",
+  "url": "https://github.com/telegraphic-dev/jbx-tool",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic"}],
+  "scm": {"connection": "scm:git:https://github.com/telegraphic-dev/jbx-tool.git", "url": "https://github.com/telegraphic-dev/jbx-tool"}
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("bundle.zip");
+
+    let out = juv_command()
+        .current_dir(tmp.path())
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("dev.telegraphic.demo:jbx-tool:1.0.0"),
+        "{stdout}"
+    );
+    let names = zip_names(&bundle);
+    assert!(
+        names.contains(&"dev/telegraphic/demo/jbx-tool/1.0.0/jbx-tool-1.0.0.pom".to_string()),
+        "{names:?}"
+    );
 }
 
 #[test]
