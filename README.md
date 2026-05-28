@@ -173,7 +173,7 @@ juv publish --file juv.json --version 1.0.1 --dry-run --gpg-key you@example.com
 juv publish --file juv.json --dry-run --skip-signing  # local inspection only
 ```
 
-Use `--version` when release/tag workflows need to publish a different version than the descriptor.
+Use `--version` when release/tag workflows need to publish a different version than the descriptor. If `main` has no extension, `juv publish` first checks the exact path and then tries `.java`, `.jsh`, and `.jav` next to `juv.json`; missing main files get an explicit `publish main source not found` error.
 
 For GitHub-hosted repositories, `juv publish` can prefill Maven Central POM `url`, `licenses`, `developers`, and `scm` metadata from the `origin` remote plus `gh repo view` when those fields are omitted. Put the fields in `juv.json` when you want explicit release metadata instead of GitHub-derived defaults. Signed Central-ready bundles require a configured GPG key; `--skip-signing` is only for local inspection.
 

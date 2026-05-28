@@ -334,6 +334,28 @@ fn publish_packages_java_compact_source_files() {
         names.contains(&format!("{base}/compact-1.0.0-sources.jar")),
         "{names:?}"
     );
+    let javadoc_names = zip_names_from_bytes(zip_entry_bytes(
+        &bundle,
+        &format!("{base}/compact-1.0.0-javadoc.jar"),
+    ));
+    assert!(
+        javadoc_names
+            .iter()
+            .any(|name| name.ends_with("index.html")),
+        "{javadoc_names:?}"
+    );
+    assert!(
+        javadoc_names
+            .iter()
+            .any(|name| name.ends_with("Hello.html")),
+        "{javadoc_names:?}"
+    );
+    assert!(
+        !javadoc_names
+            .iter()
+            .any(|name| name.ends_with("README.txt")),
+        "{javadoc_names:?}"
+    );
 }
 
 #[test]
@@ -469,6 +491,100 @@ class Helper {
         sources_names.contains(&"dev/telegraphic/demo/nested/Helper.java".to_string()),
         "{sources_names:?}"
     );
+}
+
+#[test]
+fn publish_resolves_extensionless_main_from_descriptor_to_java_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("hello.java"),
+        "/// Hello docs.\nvoid main() { IO.println(\"hello\"); }\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "group": "com.example",
+  "id": "hello",
+  "version": "0.0.0",
+  "package": "com.example",
+  "main": "hello",
+  "description": "Hello tool",
+  "url": "https://github.com/example/hello",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Example"}],
+  "scm": {"connection": "scm:git:https://github.com/example/hello.git", "url": "https://github.com/example/hello"}
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("bundle.zip");
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--file")
+        .arg(tmp.path().join("juv.json"))
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let base = "com/example/hello/0.0.0";
+    let sources_names = zip_names_from_bytes(zip_entry_bytes(
+        &bundle,
+        &format!("{base}/hello-0.0.0-sources.jar"),
+    ));
+    assert!(
+        sources_names.contains(&"hello.java".to_string()),
+        "{sources_names:?}"
+    );
+}
+
+#[test]
+fn publish_reports_missing_extensionless_main_with_context() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "group": "com.example",
+  "id": "hello",
+  "version": "0.0.0",
+  "package": "com.example",
+  "main": "hello",
+  "description": "Hello tool",
+  "url": "https://github.com/example/hello",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Example"}],
+  "scm": {"connection": "scm:git:https://github.com/example/hello.git", "url": "https://github.com/example/hello"}
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--file")
+        .arg(tmp.path().join("juv.json"))
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("publish main source not found"), "{stderr}");
+    assert!(stderr.contains("hello.java"), "{stderr}");
 }
 
 #[test]

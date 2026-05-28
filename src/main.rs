@@ -2047,7 +2047,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         descriptor_dir = base_dir.to_path_buf();
         if script.is_none() {
             if let Some(main) = json.get("main").and_then(|value| value.as_str()) {
-                script = Some(base_dir.join(main));
+                script = Some(resolve_publish_main_path(base_dir, main));
             }
         }
         if json.get("group").is_some() || json.get("id").is_some() || json.get("version").is_some()
@@ -2084,7 +2084,15 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
 
     let script =
         script.ok_or_else(|| anyhow::anyhow!("publish requires a script or juv.json main"))?;
-    let directives = parsed_directives(&script)?;
+    if !script.exists() {
+        anyhow::bail!(
+            "publish main source not found: {}{}",
+            script.display(),
+            publish_main_hint(&script)
+        );
+    }
+    let directives = parsed_directives(&script)
+        .with_context(|| format!("failed to read publish main source {}", script.display()))?;
     if coordinates.is_none() {
         if let Some(raw) = directives.gav.as_deref() {
             coordinates = Some(parse_gav_directive(raw)?);
@@ -2173,6 +2181,38 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         sources,
         repos,
     })
+}
+
+fn resolve_publish_main_path(base_dir: &Path, main: &str) -> PathBuf {
+    let raw = Path::new(main);
+    let exact = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        base_dir.join(raw)
+    };
+    if exact.exists() || raw.extension().is_some() {
+        return exact;
+    }
+    for extension in ["java", "jsh", "jav"] {
+        let candidate = exact.with_extension(extension);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    exact
+}
+
+fn publish_main_hint(path: &Path) -> String {
+    if path.extension().is_some() {
+        String::new()
+    } else {
+        format!(
+            " (also checked {}.java, {}.jsh, and {}.jav)",
+            path.display(),
+            path.display(),
+            path.display()
+        )
+    }
 }
 
 fn parse_descriptor_coordinates(json: &serde_json::Value) -> Result<PublishCoordinates> {
@@ -2779,17 +2819,6 @@ fn write_directory_jar(source_dir: &Path, jar: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_text_jar(path: &Path, name: &str, text: &str) -> Result<()> {
-    let file = fs::File::create(path)?;
-    let mut zip = zip::ZipWriter::new(file);
-    let options =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    zip.start_file(name, options)?;
-    zip.write_all(text.as_bytes())?;
-    zip.finish()?;
-    Ok(())
-}
-
 fn publish_join_classpath(paths: &[PathBuf]) -> String {
     let sep = if cfg!(windows) { ";" } else { ":" };
     paths
@@ -2811,21 +2840,6 @@ fn write_javadoc_jar(
         fs::remove_dir_all(&javadoc_dir)?;
     }
     fs::create_dir_all(&javadoc_dir)?;
-
-    let compact_sources = sources
-        .iter()
-        .map(fs::read_to_string)
-        .collect::<std::result::Result<Vec<_>, _>>()?
-        .into_iter()
-        .any(|source| looks_like_compact_source(&source));
-    if compact_sources {
-        write_text_jar(
-            jar,
-            "README.txt",
-            "Javadoc is not generated for Java compact/unnamed-class source files yet.\n",
-        )?;
-        return Ok(());
-    }
 
     let jdk_root = juv::jdk::resolve_jdk(&descriptor.java_version, true)?;
     let javadoc = juv::jdk::javadoc_bin_path(&jdk_root);
