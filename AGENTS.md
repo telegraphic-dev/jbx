@@ -2,6 +2,14 @@
 
 This repo is `juv`: a Rust-native JBang-compatible Java script runner. The product direction is **JBang parity first**, Rust-native implementation second, and novelty last.
 
+## North star
+
+`juv` should become the Java tool that is:
+
+- as capable for agents as `zerolang.ai` is: scriptable, inspectable, deterministic, and friendly to autonomous coding/debugging loops;
+- the Java equivalent of `uv` / `uvx`: fast project/script execution, dependency resolution, tool execution, testing, formatting, packaging, cache management, and environment/JDK handling behind one boringly reliable CLI;
+- more than a JBang clone over time, but only by first preserving JBang-compatible behavior where users already expect it.
+
 ## Operating mode
 
 - Start from current `origin/main` unless Vlad explicitly asks to continue an open PR.
@@ -69,7 +77,7 @@ If Docker/release packaging changes, build or dry-run the exact changed path loc
 5. Run the focused test, then full gates.
 6. Update README when the user-facing CLI surface changes.
 7. Commit with a conventional message and open a PR.
-8. After push, check GitHub CI, jean-ci, Greptile, mergeability, and unresolved review threads before reporting ready.
+8. After push, check GitHub CI, jean-ci, mergeability, and unresolved review threads before reporting ready.
 
 ## Compatibility principles
 
@@ -119,8 +127,8 @@ If Docker/release packaging changes, build or dry-run the exact changed path loc
 
 ## Bot review habits
 
-- jean-ci and Greptile can report real issues after local gates pass. Read them, fix them, and push normal commits.
-- Greptile inline threads may remain unresolved or appear after checks look green. Query review threads before reporting clean.
+- jean-ci can report real issues after local gates pass. Read them, fix them, and push normal commits.
+- Query unresolved review threads before reporting clean.
 - Common review-caught problems in this repo: Windows path/extension handling, stale generated/wrapped Java source assumptions, unresolved review threads, shell quoting in generated scripts, release idempotency, and hardcoded toolchain versions.
 
 ## Current backlog shape
