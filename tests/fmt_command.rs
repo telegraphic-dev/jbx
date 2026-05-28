@@ -51,7 +51,10 @@ def format_source(text):
     return text
 
 if args == ['-']:
-    sys.stdout.write(format_source(sys.stdin.read()))
+    stdin = sys.stdin.read()
+    if 'abstract class ' in stdin:
+        raise SystemExit(7)
+    sys.stdout.write(format_source(stdin))
     raise SystemExit(0)
 
 changed = False
@@ -196,4 +199,23 @@ fn fmt_wraps_compact_source_before_formatting_and_unwraps_afterwards() {
         "{formatted}"
     );
     assert!(!formatted.contains("__JuvFormatterWrapper"), "{formatted}");
+}
+
+#[test]
+fn fmt_does_not_wrap_regular_type_declarations_with_modifiers() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_fake_formatter(tmp.path());
+    let source = tmp.path().join("Base.java");
+    fs::write(&source, "abstract class Base { void main(){} }\n").unwrap();
+
+    let out = juv_command()
+        .arg("fmt")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .env("PATH", path_with_fake_formatter(&tmp))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
 }

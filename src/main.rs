@@ -1568,16 +1568,18 @@ fn cached_or_downloaded_native_formatter(
         }
         Err(_) => return Ok(None),
     };
-    let expected = ureq::get(&sha_url)
+    let sha_text = ureq::get(&sha_url)
         .call()
-        .ok()
-        .and_then(|response| response.into_string().ok())
-        .and_then(|text| text.split_whitespace().next().map(str::to_string));
-    if let Some(expected) = expected {
-        let actual = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&bytes));
-        if actual != expected {
-            return Err(anyhow::anyhow!("checksum mismatch for {url}"));
-        }
+        .with_context(|| format!("failed to fetch checksum for {url}"))?
+        .into_string()
+        .with_context(|| format!("failed to read checksum for {url}"))?;
+    let expected = sha_text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("empty checksum response for {url}"))?;
+    let actual = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&bytes));
+    if actual != expected {
+        return Err(anyhow::anyhow!("checksum mismatch for {url}"));
     }
     fs::write(&bin, bytes)?;
     #[cfg(unix)]
@@ -1730,14 +1732,35 @@ fn is_compact_source(source: &str) -> bool {
     source
         .lines()
         .any(|line| line.trim_start().starts_with("void main("))
-        && !source.lines().any(|line| {
-            let trimmed = line.trim_start();
-            trimmed.starts_with("class ")
-                || trimmed.starts_with("public class ")
-                || trimmed.starts_with("record ")
-                || trimmed.starts_with("interface ")
-                || trimmed.starts_with("enum ")
-        })
+        && !source
+            .lines()
+            .any(|line| starts_with_java_type_declaration(line.trim_start()))
+}
+
+fn starts_with_java_type_declaration(trimmed: &str) -> bool {
+    const TYPE_DECLARATION_PREFIXES: &[&str] = &[
+        "class ",
+        "abstract class ",
+        "sealed class ",
+        "non-sealed class ",
+        "final class ",
+        "public class ",
+        "public abstract class ",
+        "public sealed class ",
+        "public non-sealed class ",
+        "public final class ",
+        "record ",
+        "public record ",
+        "interface ",
+        "public interface ",
+        "enum ",
+        "public enum ",
+        "@interface ",
+        "public @interface ",
+    ];
+    TYPE_DECLARATION_PREFIXES
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
 }
 
 fn format_compact_source(backend: &FormatterBackend, source: &str, file: &Path) -> Result<String> {
@@ -1755,7 +1778,7 @@ fn format_compact_source(backend: &FormatterBackend, source: &str, file: &Path) 
         .spawn()
         .and_then(|mut child| {
             use std::io::Write;
-            if let Some(stdin) = child.stdin.as_mut() {
+            if let Some(mut stdin) = child.stdin.take() {
                 stdin.write_all(wrapped.as_bytes())?;
             }
             child.wait_with_output()
