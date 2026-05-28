@@ -259,7 +259,8 @@ struct TestCommand {
     #[arg(long = "trust")]
     trust: bool,
 
-    /// Java test source file.
+    /// Java test source file or directory. Defaults to the current directory.
+    #[arg(default_value = ".")]
     script: PathBuf,
 
     /// Extra arguments passed to the JUnit ConsoleLauncher after defaults.
