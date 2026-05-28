@@ -33,6 +33,8 @@ public class Greeter {
     )
     .unwrap();
     let javac = Command::new("javac")
+        .arg("--release")
+        .arg("8")
         .arg("-d")
         .arg(&lib_classes)
         .arg(&lib_src)
