@@ -54,6 +54,8 @@ if args == ['-']:
     stdin = sys.stdin.read()
     if 'abstract class ' in stdin:
         raise SystemExit(7)
+    if '\n    import ' in stdin:
+        raise SystemExit(8)
     sys.stdout.write(format_source(stdin))
     raise SystemExit(0)
 
@@ -61,6 +63,8 @@ changed = False
 for path_text in paths:
     path = pathlib.Path(path_text)
     text = path.read_text()
+    if 'static final String KEY' in text:
+        raise SystemExit(9)
     formatted = format_source(text)
     if formatted != text:
         changed = True
@@ -208,6 +212,29 @@ fn fmt_does_not_wrap_regular_type_declarations_with_modifiers() {
     write_fake_formatter(tmp.path());
     let source = tmp.path().join("Base.java");
     fs::write(&source, "abstract class Base { void main(){} }\n").unwrap();
+
+    let out = juv_command()
+        .arg("fmt")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .env("PATH", path_with_fake_formatter(&tmp))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+}
+
+#[test]
+fn fmt_keeps_block_comments_and_static_imports_outside_compact_wrapper() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_fake_formatter(tmp.path());
+    let source = tmp.path().join("agent.java");
+    fs::write(
+        &source,
+        "//JAVA 25+\n/* license */\nimport java.util.Optional;\nimport static java.lang.System.getenv;\nstatic final String KEY = getenv(\"KEY\");\nclass Helper {}\nvoid main(){IO.println(KEY);}\n",
+    )
+    .unwrap();
 
     let out = juv_command()
         .arg("fmt")
