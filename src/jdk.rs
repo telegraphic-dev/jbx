@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 
 /// Find a JDK for the given major version.
 ///
-/// Probes the juv symlink cache first, then discovers JDKs from well-known
+/// Probes the jbx symlink cache first, then discovers JDKs from well-known
 /// locations. If `auto_install` is true and no JDK is found, downloads from
 /// Adoptium.
 ///
@@ -38,6 +38,17 @@ pub fn find_jdk(major_version: u32, auto_install: bool) -> anyhow::Result<PathBu
         return Ok(cached);
     } else if cached.exists() || cached.is_symlink() {
         let _ = remove_stale_cache_entry(&cached);
+    }
+
+    // 1b. During the juv → jbx rebrand, adopt an existing valid juv JDK cache
+    // entry into the new jbx namespace instead of forcing a fresh download.
+    let legacy_cached = legacy_jdk_cache_dir()?.join(major_version.to_string());
+    if looks_like_jdk_root(&legacy_cached) {
+        let _ = create_symlink_dir(&legacy_cached, &cached);
+        if looks_like_jdk_root(&cached) {
+            return Ok(cached);
+        }
+        return Ok(legacy_cached);
     }
 
     // 2. Scan all known locations, build a map of major → root
@@ -346,7 +357,7 @@ fn parse_major_from_version_string(version: &str) -> Option<u32> {
 
 /// Parse a JBang-style `//JAVA` directive into the requested major version.
 ///
-/// JBang accepts selectors such as `25+` to mean Java 25 or newer. For juv's
+/// JBang accepts selectors such as `25+` to mean Java 25 or newer. For jbx's
 /// current resolver we use the leading major as the requested floor.
 pub fn parse_java_version_directive(version: &str) -> anyhow::Result<u32> {
     parse_major_from_version_string(version)
@@ -396,7 +407,7 @@ fn install_from_adoptium(major_version: u32) -> anyhow::Result<PathBuf> {
 
     eprintln!("Downloading JDK {major_version} from Adoptium...");
 
-    let agent = format!("juv/{}", env!("CARGO_PKG_VERSION"));
+    let agent = format!("jbx/{}", env!("CARGO_PKG_VERSION"));
     let expected_checksum = normalize_sha256(&fetch_adoptium_checksum(&checksum_url, &agent)?)?;
 
     let archive_path = target_dir.with_extension(if os == "windows" {
@@ -629,6 +640,12 @@ fn detect_platform() -> anyhow::Result<(&'static str, &'static str)> {
 /// The jbx JDK cache directory: ~/.cache/jbx/jdks/
 fn jdk_cache_dir() -> anyhow::Result<PathBuf> {
     let cache = dirs::cache_dir().ok_or_else(|| anyhow!("cannot determine cache directory"))?;
+    Ok(cache.join("jbx").join("jdks"))
+}
+
+/// The legacy juv JDK cache directory used before the jbx rebrand.
+fn legacy_jdk_cache_dir() -> anyhow::Result<PathBuf> {
+    let cache = dirs::cache_dir().ok_or_else(|| anyhow!("cannot determine cache directory"))?;
     Ok(cache.join("juv").join("jdks"))
 }
 
@@ -738,7 +755,7 @@ pub fn resolve_jdk(java_version: &Option<String>, auto_install: bool) -> anyhow:
 }
 
 /// The default Java version when none is specified.
-/// Defaults to 25 (Java 25 LTS) per juv's baseline.
+/// Defaults to 25 (Java 25 LTS) per jbx's baseline.
 fn default_java_version() -> u32 {
     25
 }

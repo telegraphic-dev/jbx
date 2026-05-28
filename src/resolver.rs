@@ -1225,7 +1225,7 @@ fn download_jar(
         .join(&artifact_name)
         .join(&jar_name);
 
-    // 1. Check juv's own cache
+    // 1. Check jbx's own cache
     if jar_path.exists() {
         return Ok(jar_path);
     }
