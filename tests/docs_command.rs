@@ -91,6 +91,151 @@ void main() {
 }
 
 #[test]
+fn docs_local_source_json_includes_structured_types_and_members() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("Widget.java");
+    fs::write(
+        &source,
+        r#"package dev.telegraphic.demo;
+
+@Deprecated(since = "1.0", forRemoval = false)
+public class Widget extends BaseWidget implements java.io.Serializable {
+  public static final String KIND = "widget";
+  private int count;
+
+  public Widget(String name) {}
+
+  @Deprecated
+  public java.util.List<String> names(String prefix, int limit) throws java.io.IOException {
+    return java.util.List.of(prefix);
+  }
+
+  protected int size() { return count; }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("docs")
+        .arg(&source)
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let ty = &json["types"][0];
+    assert_eq!(ty["kind"], "class");
+    assert_eq!(ty["name"], "Widget");
+    assert_eq!(ty["qualifiedName"], "dev.telegraphic.demo.Widget");
+    assert_eq!(ty["package"], "dev.telegraphic.demo");
+    assert_eq!(ty["visibility"], "public");
+    assert_eq!(
+        ty["annotations"][0]["qualifiedName"],
+        "java.lang.Deprecated"
+    );
+    assert_eq!(ty["extends"], "dev.telegraphic.demo.BaseWidget");
+    assert_eq!(ty["implements"][0], "java.io.Serializable");
+    assert_eq!(
+        ty["fields"][0]["qualifiedName"],
+        "dev.telegraphic.demo.Widget.KIND"
+    );
+    assert_eq!(ty["fields"][0]["type"], "String");
+    assert_eq!(ty["fields"][0]["visibility"], "public");
+    assert_eq!(ty["constructors"][0]["parameters"][0]["type"], "String");
+    let method = ty["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|method| method["name"] == "names")
+        .unwrap();
+    assert_eq!(method["qualifiedName"], "dev.telegraphic.demo.Widget.names");
+    assert_eq!(method["visibility"], "public");
+    assert_eq!(method["returnType"], "java.util.List<String>");
+    assert_eq!(method["parameters"][0]["name"], "prefix");
+    assert_eq!(method["parameters"][0]["type"], "String");
+    assert_eq!(method["parameters"][1]["type"], "int");
+    assert_eq!(method["throws"][0], "java.io.IOException");
+    assert_eq!(
+        method["annotations"][0]["qualifiedName"],
+        "java.lang.Deprecated"
+    );
+}
+
+#[test]
+fn docs_local_jar_json_includes_structured_types_from_javap() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source_dir = tmp.path().join("src/dev/telegraphic/demo");
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("JarWidget.java");
+    fs::write(
+        &source,
+        r#"package dev.telegraphic.demo;
+
+public class JarWidget {
+  public static final String KIND = "jar";
+  protected int count;
+  public JarWidget() {}
+  public String greet(String name) { return name; }
+  protected int size() { return count; }
+}
+"#,
+    )
+    .unwrap();
+    let classes = tmp.path().join("classes");
+    fs::create_dir_all(&classes).unwrap();
+    let javac = Command::new("javac")
+        .arg("-parameters")
+        .arg("-d")
+        .arg(&classes)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_success(&javac);
+    let jar = tmp.path().join("widgets.jar");
+    let jar_out = Command::new("jar")
+        .arg("--create")
+        .arg("--file")
+        .arg(&jar)
+        .arg("-C")
+        .arg(&classes)
+        .arg(".")
+        .output()
+        .unwrap();
+    assert_success(&jar_out);
+
+    let out = jbx_command()
+        .arg("docs")
+        .arg(&jar)
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let ty = &json["types"][0];
+    assert_eq!(ty["qualifiedName"], "dev.telegraphic.demo.JarWidget");
+    assert_eq!(ty["fields"][0]["name"], "KIND");
+    let greet = ty["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|method| method["name"] == "greet")
+        .unwrap();
+    assert_eq!(greet["returnType"], "String");
+    assert_eq!(greet["parameters"][0]["name"], "name");
+    assert_eq!(greet["parameters"][0]["type"], "String");
+    let size = ty["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|method| method["name"] == "size")
+        .unwrap();
+    assert_eq!(size["visibility"], "protected");
+}
+
+#[test]
 fn docs_remote_gav_fetches_markdown_sidecar_and_reuses_cache() {
     let tmp = tempfile::tempdir().unwrap();
     let docs = b"# Remote docs\n\nUse this from cache.\n".to_vec();
