@@ -1701,16 +1701,28 @@ fn formatter_error(file: &Path, output: std::process::Output) -> anyhow::Error {
 }
 
 fn is_compact_source(source: &str) -> bool {
+    let mut brace_depth = 0usize;
     for line in source.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("void main(") {
+        let at_top_level = brace_depth == 0;
+        let starts_type = starts_with_java_type_declaration(trimmed);
+        if at_top_level && !starts_type && trimmed.starts_with("void main(") {
             return true;
         }
-        if starts_with_java_type_declaration(trimmed) {
-            return false;
-        }
+        brace_depth = update_brace_depth(brace_depth, line);
     }
     false
+}
+
+fn update_brace_depth(mut depth: usize, line: &str) -> usize {
+    for ch in line.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    depth
 }
 
 fn starts_with_java_type_declaration(trimmed: &str) -> bool {
@@ -1772,21 +1784,28 @@ fn split_compact_prefix(source: &str) -> (String, String) {
     let mut prefix = String::new();
     let mut body = String::new();
     let mut in_prefix = true;
+    let mut in_block_comment = false;
     for line in source.lines() {
         let trimmed = line.trim_start();
-        if in_prefix
-            && (trimmed.is_empty()
+        if in_prefix {
+            let prefix_line = in_block_comment
+                || trimmed.is_empty()
                 || trimmed.starts_with("//")
                 || trimmed.starts_with("#!")
-                || trimmed.starts_with("import "))
-        {
-            prefix.push_str(line);
-            prefix.push('\n');
-        } else {
+                || trimmed.starts_with("import ")
+                || trimmed.starts_with("/*");
+            if prefix_line {
+                prefix.push_str(line);
+                prefix.push('\n');
+                if in_block_comment || trimmed.starts_with("/*") {
+                    in_block_comment = !trimmed.contains("*/");
+                }
+                continue;
+            }
             in_prefix = false;
-            body.push_str(line);
-            body.push('\n');
         }
+        body.push_str(line);
+        body.push('\n');
     }
     (prefix, body.trim_end().to_string())
 }
