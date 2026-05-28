@@ -229,6 +229,10 @@ struct DocsCommand {
     #[arg(long = "repo", alias = "repos")]
     repos: Vec<String>,
 
+    /// Limit structured output to matching type names. Repeatable; accepts simple or fully-qualified names.
+    #[arg(long = "type", alias = "types")]
+    types: Vec<String>,
+
     /// Override remote docs cache directory.
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
@@ -1344,7 +1348,7 @@ struct DocsCoordinate {
 fn run_docs(cmd: DocsCommand) -> Result<i32> {
     let target_path = PathBuf::from(&cmd.target);
     let output = if target_path.exists() {
-        render_local_docs(&target_path, cmd.json)?
+        render_local_docs(&target_path, cmd.json, &cmd.types)?
     } else if looks_like_docs_coordinate(&cmd.target) {
         fetch_remote_docs(&cmd)?
     } else {
@@ -1392,9 +1396,9 @@ fn parse_docs_coordinate(
     Ok(DocsCoordinate { group, id, version })
 }
 
-fn render_local_docs(path: &Path, json: bool) -> Result<String> {
+fn render_local_docs(path: &Path, json: bool, type_filters: &[String]) -> Result<String> {
     if is_jar_file(path) {
-        return render_jar_docs(path, json);
+        return render_jar_docs(path, json, type_filters);
     }
     let sources = collect_java_files(&[path.to_path_buf()])?;
     if sources.is_empty() {
@@ -1407,7 +1411,7 @@ fn render_local_docs(path: &Path, json: bool) -> Result<String> {
         .iter()
         .map(|source| docs_source_json(source, None))
         .collect::<Result<Vec<_>>>()?;
-    let types = extract_docs_types_from_sources(&sources)?;
+    let types = filter_docs_types(extract_docs_types_from_sources(&sources)?, type_filters);
     let title = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -1534,8 +1538,13 @@ fn is_jar_file(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("jar"))
 }
 
-fn render_jar_docs(path: &Path, json: bool) -> Result<String> {
-    let types = extract_docs_types_from_jar(path)?;
+fn render_jar_docs(path: &Path, json: bool, type_filters: &[String]) -> Result<String> {
+    let docs_source = if find_javadoc_jar(path).is_some() {
+        "javadoc"
+    } else {
+        "javap"
+    };
+    let types = filter_docs_types(extract_docs_types_from_jar(path)?, type_filters);
     let title = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -1548,7 +1557,7 @@ fn render_jar_docs(path: &Path, json: bool) -> Result<String> {
                 "target": path.to_string_lossy(),
                 "types": types,
                 "generatedFrom": {
-                    "source": "javap",
+                    "source": docs_source,
                     "jbxVersion": env!("CARGO_PKG_VERSION"),
                 }
             }))?
@@ -1885,6 +1894,151 @@ fn parse_annotation(line: &str, package: &str) -> serde_json::Value {
 }
 
 fn extract_docs_types_from_jar(path: &Path) -> Result<Vec<serde_json::Value>> {
+    if let Some(javadocs) = find_javadoc_jar(path) {
+        let types = extract_docs_types_from_javadoc_jar(&javadocs)?;
+        if !types.is_empty() {
+            return Ok(types);
+        }
+    }
+    extract_docs_types_from_bytecode(path)
+}
+
+fn find_javadoc_jar(path: &Path) -> Option<PathBuf> {
+    let stem = path.file_stem()?.to_str()?;
+    let parent = path.parent()?;
+    let candidates = [
+        parent.join(format!("{stem}-javadoc.jar")),
+        parent.join(format!("{stem}-javadocs.jar")),
+    ];
+    candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn extract_docs_types_from_javadoc_jar(path: &Path) -> Result<Vec<serde_json::Value>> {
+    let file = fs::File::open(path)
+        .with_context(|| format!("failed to open javadoc jar {}", path.display()))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .with_context(|| format!("failed to read javadoc jar {}", path.display()))?;
+    let mut types = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        let name = entry.name().to_string();
+        if !is_javadoc_type_page(&name) {
+            continue;
+        }
+        let mut html = String::new();
+        entry.read_to_string(&mut html)?;
+        if let Some(ty) = parse_javadoc_type_page(&name, &html) {
+            types.push(ty);
+        }
+    }
+    types.sort_by_key(|value| {
+        value
+            .get("qualifiedName")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string()
+    });
+    Ok(types)
+}
+
+fn is_javadoc_type_page(name: &str) -> bool {
+    name.ends_with(".html")
+        && !name.contains('-')
+        && !name.ends_with("/package-summary.html")
+        && !name.ends_with("/module-summary.html")
+        && !name.ends_with("/overview-summary.html")
+        && !name.ends_with("/index.html")
+        && name.rsplit('/').next().is_some_and(|file| {
+            file.chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_uppercase())
+        })
+}
+
+fn parse_javadoc_type_page(path: &str, html: &str) -> Option<serde_json::Value> {
+    let qualified_name = path.trim_end_matches(".html").replace('/', ".");
+    let (package, name) = qualified_name
+        .rsplit_once('.')
+        .map(|(package, name)| (package.to_string(), name.to_string()))
+        .unwrap_or_else(|| (String::new(), qualified_name.clone()));
+    let text = normalize_doc_text(&strip_html_tags(html));
+    let kind = if text.contains(&format!("interface {name}")) {
+        "interface"
+    } else if text.contains(&format!("enum {name}")) {
+        "enum"
+    } else if text.contains(&format!("record {name}")) {
+        "record"
+    } else {
+        "class"
+    };
+    let signatures = extract_javadoc_signatures(html);
+    let mut builder = DocsTypeBuilder {
+        kind: kind.to_string(),
+        name: name.clone(),
+        qualified_name: qualified_name.clone(),
+        package: package.clone(),
+        visibility: "public".to_string(),
+        modifiers: vec!["public".to_string()],
+        annotations: Vec::new(),
+        extends: None,
+        implements: Vec::new(),
+        fields: Vec::new(),
+        constructors: Vec::new(),
+        methods: Vec::new(),
+    };
+    for signature in signatures {
+        if let Some(member) = parse_member_declaration(&signature, &package, &name, Vec::new()) {
+            builder.push_member(member);
+        }
+    }
+    Some(builder.into_json())
+}
+
+fn extract_javadoc_signatures(html: &str) -> Vec<String> {
+    let mut signatures = Vec::new();
+    let re = regex::Regex::new(r#"(?s)<div class="member-signature">(.*?)</div>"#).unwrap();
+    for captures in re.captures_iter(html) {
+        if let Some(signature) = captures.get(1) {
+            let text = normalize_doc_text(&strip_html_tags(signature.as_str()));
+            if !text.is_empty() {
+                signatures.push(text);
+            }
+        }
+    }
+    if signatures.is_empty() {
+        let pre = regex::Regex::new(r#"(?s)<pre[^>]*>(.*?)</pre>"#).unwrap();
+        for captures in pre.captures_iter(html) {
+            if let Some(signature) = captures.get(1) {
+                let text = normalize_doc_text(&strip_html_tags(signature.as_str()));
+                if text.contains('(') || text.ends_with(';') {
+                    signatures.push(text.trim_end_matches(';').to_string());
+                }
+            }
+        }
+    }
+    signatures
+}
+
+fn strip_html_tags(input: &str) -> String {
+    let tags = regex::Regex::new(r#"(?s)<[^>]+>"#).unwrap();
+    html_unescape(&tags.replace_all(input, " "))
+}
+
+fn html_unescape(input: &str) -> String {
+    input
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+}
+
+fn normalize_doc_text(input: &str) -> String {
+    input.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn extract_docs_types_from_bytecode(path: &Path) -> Result<Vec<serde_json::Value>> {
     let output = ProcessCommand::new("jar")
         .arg("tf")
         .arg(path)
@@ -2153,6 +2307,61 @@ fn count_char(input: &str, needle: char) -> i32 {
     input.chars().filter(|ch| *ch == needle).count() as i32
 }
 
+fn filter_docs_types(types: Vec<serde_json::Value>, filters: &[String]) -> Vec<serde_json::Value> {
+    if filters.is_empty() {
+        return types;
+    }
+    types
+        .into_iter()
+        .filter(|ty| docs_type_matches_filters(ty, filters))
+        .collect()
+}
+
+fn docs_type_matches_filters(ty: &serde_json::Value, filters: &[String]) -> bool {
+    let name = ty
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let qualified_name = ty
+        .get("qualifiedName")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    filters.iter().any(|filter| {
+        let filter = filter.trim();
+        filter == name
+            || filter == qualified_name
+            || qualified_name.ends_with(&format!(".{filter}"))
+            || simple_glob_match(filter, name)
+            || simple_glob_match(filter, qualified_name)
+    })
+}
+
+fn filter_remote_docs_text(text: String, json: bool, type_filters: &[String]) -> Result<String> {
+    if !json || type_filters.is_empty() {
+        return Ok(text);
+    }
+    let mut value: serde_json::Value = serde_json::from_str(&text)?;
+    if let Some(types) = value
+        .get_mut("types")
+        .and_then(|value| value.as_array_mut())
+    {
+        let filtered = filter_docs_types(std::mem::take(types), type_filters);
+        *types = filtered;
+    }
+    Ok(format!("{}\n", serde_json::to_string_pretty(&value)?))
+}
+
+fn simple_glob_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    match (pattern.strip_prefix('*'), pattern.strip_suffix('*')) {
+        (Some(suffix), _) => value.ends_with(suffix),
+        (_, Some(prefix)) => value.starts_with(prefix),
+        _ => false,
+    }
+}
+
 fn fetch_remote_docs(cmd: &DocsCommand) -> Result<String> {
     let repos = docs_repositories(&cmd.repos);
     let coordinate = parse_docs_coordinate(&cmd.target, &repos)?;
@@ -2172,8 +2381,9 @@ fn fetch_remote_docs(cmd: &DocsCommand) -> Result<String> {
         .join(&coordinate.version)
         .join(&filename);
     if cache_path.exists() {
-        return fs::read_to_string(&cache_path)
-            .with_context(|| format!("failed to read cached docs {}", cache_path.display()));
+        let text = fs::read_to_string(&cache_path)
+            .with_context(|| format!("failed to read cached docs {}", cache_path.display()))?;
+        return filter_remote_docs_text(text, cmd.json, &cmd.types);
     }
     for repo in repos {
         let url = docs_artifact_url(&repo, &coordinate, &filename);
@@ -2186,18 +2396,82 @@ fn fetch_remote_docs(cmd: &DocsCommand) -> Result<String> {
                     fs::create_dir_all(parent)?;
                 }
                 fs::write(&cache_path, &text)?;
-                return Ok(text);
+                return filter_remote_docs_text(text, cmd.json, &cmd.types);
             }
             Err(ureq::Error::Status(404, _)) => continue,
             Err(_) => continue,
         }
     }
-    anyhow::bail!(
-        "jbx docs sidecar not found for {}:{}:{} ({filename})",
-        coordinate.group,
-        coordinate.id,
-        coordinate.version
+    fetch_remote_javadoc_docs(cmd, &coordinate, &cache_root)
+}
+
+fn fetch_remote_javadoc_docs(
+    cmd: &DocsCommand,
+    coordinate: &DocsCoordinate,
+    cache_root: &Path,
+) -> Result<String> {
+    let filename = format!("{}-{}-javadoc.jar", coordinate.id, coordinate.version);
+    let cache_path = cache_root
+        .join(coordinate.group.replace('.', "/"))
+        .join(&coordinate.id)
+        .join(&coordinate.version)
+        .join(&filename);
+    if !cache_path.exists() {
+        let mut found = false;
+        for repo in docs_repositories(&cmd.repos) {
+            let url = docs_artifact_url(&repo, coordinate, &filename);
+            match ureq::get(&url).call() {
+                Ok(response) => {
+                    let mut bytes = Vec::new();
+                    response
+                        .into_reader()
+                        .read_to_end(&mut bytes)
+                        .with_context(|| format!("failed to read javadoc jar from {url}"))?;
+                    if let Some(parent) = cache_path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(&cache_path, bytes)?;
+                    found = true;
+                    break;
+                }
+                Err(ureq::Error::Status(404, _)) => continue,
+                Err(_) => continue,
+            }
+        }
+        if !found {
+            anyhow::bail!(
+                "jbx docs sidecar or javadoc jar not found for {}:{}:{}",
+                coordinate.group,
+                coordinate.id,
+                coordinate.version
+            );
+        }
+    }
+    let types = filter_docs_types(
+        extract_docs_types_from_javadoc_jar(&cache_path)?,
+        &cmd.types,
     );
+    if cmd.json {
+        Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+                "artifact": {
+                    "group": coordinate.group,
+                    "id": coordinate.id,
+                    "version": coordinate.version,
+                    "coordinate": format!("{}:{}:{}", coordinate.group, coordinate.id, coordinate.version),
+                },
+                "types": types,
+                "generatedFrom": {
+                    "source": "javadoc",
+                    "jbxVersion": env!("CARGO_PKG_VERSION"),
+                }
+            }))?
+        ))
+    } else {
+        render_docs_markdown(&coordinate.id, Some(coordinate), &[], &types)
+    }
 }
 
 fn docs_repositories(repo_args: &[String]) -> Vec<jbx::resolver::Repository> {

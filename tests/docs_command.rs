@@ -53,6 +53,28 @@ fn serve_files(files: HashMap<&'static str, Vec<u8>>) -> (String, Arc<Mutex<Vec<
     (base, requests)
 }
 
+fn javadoc_jar_bytes(files: &[(&str, &str)]) -> Vec<u8> {
+    let tmp = tempfile::tempdir().unwrap();
+    let docs = tmp.path().join("docs");
+    for (path, content) in files {
+        let file = docs.join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, content).unwrap();
+    }
+    let jar = tmp.path().join("javadocs.jar");
+    let out = Command::new("jar")
+        .arg("--create")
+        .arg("--file")
+        .arg(&jar)
+        .arg("-C")
+        .arg(&docs)
+        .arg(".")
+        .output()
+        .unwrap();
+    assert_success(&out);
+    fs::read(jar).unwrap()
+}
+
 #[test]
 fn docs_local_source_defaults_to_markdown_and_does_not_cache() {
     let tmp = tempfile::tempdir().unwrap();
@@ -164,35 +186,10 @@ public class Widget extends BaseWidget implements java.io.Serializable {
 }
 
 #[test]
-fn docs_local_jar_json_includes_structured_types_from_javap() {
+fn docs_local_jar_json_prefers_javadoc_and_supports_repeatable_type_filter() {
     let tmp = tempfile::tempdir().unwrap();
-    let source_dir = tmp.path().join("src/dev/telegraphic/demo");
-    fs::create_dir_all(&source_dir).unwrap();
-    let source = source_dir.join("JarWidget.java");
-    fs::write(
-        &source,
-        r#"package dev.telegraphic.demo;
-
-public class JarWidget {
-  public static final String KIND = "jar";
-  protected int count;
-  public JarWidget() {}
-  public String greet(String name) { return name; }
-  protected int size() { return count; }
-}
-"#,
-    )
-    .unwrap();
     let classes = tmp.path().join("classes");
     fs::create_dir_all(&classes).unwrap();
-    let javac = Command::new("javac")
-        .arg("-parameters")
-        .arg("-d")
-        .arg(&classes)
-        .arg(&source)
-        .output()
-        .unwrap();
-    assert_success(&javac);
     let jar = tmp.path().join("widgets.jar");
     let jar_out = Command::new("jar")
         .arg("--create")
@@ -205,16 +202,56 @@ public class JarWidget {
         .unwrap();
     assert_success(&jar_out);
 
+    let docs_dir = tmp.path().join("javadocs/dev/telegraphic/demo");
+    fs::create_dir_all(&docs_dir).unwrap();
+    fs::write(
+        docs_dir.join("JarWidget.html"),
+        r#"<!doctype html><html><body>
+<section class="class-description">public class JarWidget</section>
+<div class="member-signature"><span class="modifiers">public static final</span> <span class="return-type">String</span> <span class="element-name">KIND</span></div>
+<div class="member-signature"><span class="modifiers">public</span> <span class="element-name">JarWidget</span><span class="parameters">(String name)</span></div>
+<div class="member-signature"><span class="modifiers">public</span> <span class="return-type">String</span> <span class="element-name">greet</span><span class="parameters">(String name)</span></div>
+<div class="member-signature"><span class="modifiers">protected</span> <span class="return-type">int</span> <span class="element-name">size</span><span class="parameters">()</span></div>
+</body></html>"#,
+    )
+    .unwrap();
+    fs::write(
+        docs_dir.join("OtherWidget.html"),
+        r#"<!doctype html><html><body>
+<section class="class-description">public class OtherWidget</section>
+<div class="member-signature"><span class="modifiers">public</span> <span class="return-type">String</span> <span class="element-name">other</span><span class="parameters">()</span></div>
+</body></html>"#,
+    )
+    .unwrap();
+    let javadocs = tmp.path().join("widgets-javadoc.jar");
+    let javadocs_out = Command::new("jar")
+        .arg("--create")
+        .arg("--file")
+        .arg(&javadocs)
+        .arg("-C")
+        .arg(tmp.path().join("javadocs"))
+        .arg(".")
+        .output()
+        .unwrap();
+    assert_success(&javadocs_out);
+
     let out = jbx_command()
         .arg("docs")
         .arg(&jar)
         .arg("--json")
+        .arg("--type")
+        .arg("JarWidget")
+        .arg("--type")
+        .arg("NoSuchType")
         .output()
         .unwrap();
 
     assert_success(&out);
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let ty = &json["types"][0];
+    assert_eq!(json["generatedFrom"]["source"], "javadoc");
+    let types = json["types"].as_array().unwrap();
+    assert_eq!(types.len(), 1, "type filters should trim javadoc output");
+    let ty = &types[0];
     assert_eq!(ty["qualifiedName"], "dev.telegraphic.demo.JarWidget");
     assert_eq!(ty["fields"][0]["name"], "KIND");
     let greet = ty["methods"]
@@ -331,17 +368,76 @@ fn docs_remote_group_artifact_resolves_latest_docs_sidecar() {
 }
 
 #[test]
-fn docs_remote_gav_json_fetches_json_sidecar() {
+fn docs_remote_gav_json_falls_back_to_javadoc_jar_and_filters_types() {
+    let tmp = tempfile::tempdir().unwrap();
+    let javadocs = javadoc_jar_bytes(&[
+        (
+            "com/fasterxml/jackson/databind/ObjectMapper.html",
+            r#"<html><body><section>public class ObjectMapper</section>
+<div class="member-signature"><span class="modifiers">public</span> <span class="return-type">String</span> <span class="element-name">writeValueAsString</span><span class="parameters">(Object value)</span></div>
+</body></html>"#,
+        ),
+        (
+            "com/fasterxml/jackson/databind/JsonNode.html",
+            r#"<html><body><section>public abstract class JsonNode</section>
+<div class="member-signature"><span class="modifiers">public</span> <span class="return-type">String</span> <span class="element-name">asText</span><span class="parameters">()</span></div>
+</body></html>"#,
+        ),
+    ]);
+    let (repo, requests) = serve_files(HashMap::from([(
+        "/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2-javadoc.jar",
+        javadocs,
+    )]));
+
+    let out = jbx_command()
+        .arg("docs")
+        .arg("com.fasterxml.jackson.core:jackson-databind:2.17.2")
+        .arg("--json")
+        .arg("--type")
+        .arg("ObjectMapper")
+        .arg("--repo")
+        .arg(format!("local={repo}"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["generatedFrom"]["source"], "javadoc");
+    assert_eq!(json["types"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        json["types"][0]["qualifiedName"],
+        "com.fasterxml.jackson.databind.ObjectMapper"
+    );
+    assert_eq!(json["types"][0]["methods"][0]["name"], "writeValueAsString");
+    let seen = requests.lock().unwrap();
+    assert!(
+        seen.iter().any(|path| path.as_str()
+            == "/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2-jbx-docs.json"),
+        "sidecar should be tried before javadocs fallback: {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|path| path.as_str()
+            == "/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2-javadoc.jar"),
+        "expected javadocs fallback fetch: {seen:?}"
+    );
+}
+
+#[test]
+fn docs_remote_gav_json_fetches_json_sidecar_and_filters_types() {
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _) = serve_files(HashMap::from([(
         "/dev/telegraphic/demo/1.0.0/demo-1.0.0-jbx-docs.json",
-        br#"{"artifact":"dev.telegraphic:demo:1.0.0","summary":"Remote docs"}"#.to_vec(),
+        br#"{"artifact":"dev.telegraphic:demo:1.0.0","summary":"Remote docs","types":[{"name":"ObjectMapper","qualifiedName":"com.fasterxml.jackson.databind.ObjectMapper"},{"name":"JsonNode","qualifiedName":"com.fasterxml.jackson.databind.JsonNode"}]}"#.to_vec(),
     )]));
 
     let out = jbx_command()
         .arg("docs")
         .arg("dev.telegraphic:demo:1.0.0")
         .arg("--json")
+        .arg("--type")
+        .arg("JsonNode")
         .arg("--repo")
         .arg(format!("local={repo}"))
         .arg("--cache-dir")
@@ -353,4 +449,6 @@ fn docs_remote_gav_json_fetches_json_sidecar() {
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["artifact"], "dev.telegraphic:demo:1.0.0");
     assert_eq!(json["summary"], "Remote docs");
+    assert_eq!(json["types"].as_array().unwrap().len(), 1);
+    assert_eq!(json["types"][0]["name"], "JsonNode");
 }
