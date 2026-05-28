@@ -2234,12 +2234,26 @@ fn stage_publish_source(descriptor: &PublishDescriptor, staging_dir: &Path) -> R
             descriptor.gav.artifact.replace('-', "")
         )
     });
+    if looks_like_compact_source(&source) {
+        anyhow::bail!(
+            "publish cannot package Java compact source files yet; use an explicit class with a package declaration"
+        );
+    }
     validate_package_name(&package_name)?;
     let package_dir = staging_dir.join(package_name.replace('.', "/"));
     fs::create_dir_all(&package_dir)?;
     let target = package_dir.join(file_name);
     fs::write(&target, format!("package {package_name};\n\n{source}"))?;
     Ok(target)
+}
+
+fn looks_like_compact_source(source: &str) -> bool {
+    let has_type_declaration = source.contains(" class ")
+        || source.contains(" public class ")
+        || source.contains(" record ")
+        || source.contains(" interface ")
+        || source.contains(" enum ");
+    !has_type_declaration && source.contains("void main(")
 }
 
 fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {

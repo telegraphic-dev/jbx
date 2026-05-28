@@ -171,6 +171,36 @@ fn publish_target_dir_dot_does_not_delete_unrelated_files() {
 }
 
 #[test]
+fn publish_rejects_compact_source_instead_of_injecting_illegal_package() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("Hello.java"), "void main() {}\n").unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "main": "Hello.java",
+  "gav": { "group": "dev.telegraphic.demo", "artifact": "compact", "version": "1.0.0" },
+  "package": "dev.telegraphic.demo.compact"
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--file")
+        .arg(tmp.path().join("juv.json"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("compact source files"), "{stderr}");
+}
+
+#[test]
 fn publish_requires_structured_gav_metadata() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("Hello.java"), "void main() {}\n").unwrap();
