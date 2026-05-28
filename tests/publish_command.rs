@@ -1065,3 +1065,23 @@ fn publish_requires_central_credentials_before_uploading() {
         "{stderr}"
     );
 }
+
+#[test]
+fn publish_rejects_dry_run_publish_combination_before_work() {
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--publish")
+        .arg("--file")
+        .arg("does-not-matter.json")
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("cannot be used with")
+            || stderr.contains("--dry-run and --publish are mutually exclusive"),
+        "{stderr}"
+    );
+}

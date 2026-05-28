@@ -2034,6 +2034,9 @@ struct PublishDescriptor {
 }
 
 fn run_publish(cmd: PublishCommand) -> Result<i32> {
+    if cmd.publish && cmd.dry_run {
+        anyhow::bail!("--dry-run and --publish are mutually exclusive; dry-run never uploads");
+    }
     if !cmd.publish && !cmd.dry_run {
         anyhow::bail!(
             "publish requires --dry-run for local inspection or --publish for Maven Central upload"
