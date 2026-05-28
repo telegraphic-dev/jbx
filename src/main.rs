@@ -1,8 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use juv::{
@@ -56,6 +58,8 @@ enum Commands {
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
     Fetch(FetchCommand),
+    /// Run JUnit tests with the standalone console launcher.
+    Test(TestCommand),
     /// Run an executable JAR resolved from Maven coordinates.
     Juvx(JuvxCommand),
     /// Manage installed JDKs.
@@ -186,6 +190,82 @@ struct BuildCommand {
 
     /// Java source file.
     script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct TestCommand {
+    /// Print converted JUnit XML report as JSON.
+    #[arg(long = "json", conflicts_with = "xml")]
+    json: bool,
+
+    /// Print the generated JUnit XML report.
+    #[arg(long = "xml", conflicts_with = "json")]
+    xml: bool,
+
+    /// JUnit Platform Console Standalone version to use.
+    ///
+    /// Defaults to the cached latest Maven Central release, refreshed periodically.
+    #[arg(long = "junit-version")]
+    junit_version: Option<String>,
+
+    /// Additional dependency coordinates, same shape as //DEPS.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional source file, same shape as //SOURCES.
+    #[arg(long = "source", alias = "sources")]
+    sources: Vec<String>,
+
+    /// Additional file/resource, same shape as //FILES.
+    #[arg(long = "files", alias = "file")]
+    files: Vec<String>,
+
+    /// Additional classpath entries.
+    #[arg(long = "class-path", alias = "cp")]
+    classpath: Vec<PathBuf>,
+
+    /// Additional javac option.
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
+    javac_options: Vec<String>,
+
+    /// Additional java runtime option for the JUnit launcher JVM.
+    #[arg(
+        long = "runtime-option",
+        alias = "java-option",
+        allow_hyphen_values = true
+    )]
+    runtime_options: Vec<String>,
+
+    /// Override //JAVA requested version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Additional java agent, same shape as //JAVAAGENT.
+    #[arg(long = "javaagent")]
+    java_agents: Vec<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Trust this remote script content hash before testing.
+    #[arg(long = "trust")]
+    trust: bool,
+
+    /// Java test source file or directory. Defaults to the current directory.
+    #[arg(default_value = ".")]
+    script: PathBuf,
+
+    /// Extra arguments passed to the JUnit ConsoleLauncher after defaults.
+    #[arg(trailing_var_arg = true)]
+    args: Vec<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -1326,6 +1406,358 @@ fn run_juvx(cmd: JuvxCommand) -> Result<i32> {
     })
 }
 
+fn format_cli_java_agent(agent: &KeyValue) -> String {
+    match &agent.value {
+        Some(value) => format!("-javaagent:{}={}", agent.key, value),
+        None => format!("-javaagent:{}", agent.key),
+    }
+}
+
+const DEFAULT_JUNIT_PLATFORM_VERSION: &str = "6.1.0";
+const JUNIT_VERSION_CACHE_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+
+fn run_tests(cmd: TestCommand) -> Result<i32> {
+    let junit_version = match cmd.junit_version.clone() {
+        Some(version) => version,
+        None => latest_cached_junit_platform_version(cmd.cache_dir.as_deref()).unwrap_or_else(|err| {
+            eprintln!(
+                "warning: could not determine latest JUnit Platform Console Standalone version: {err:#}; using {DEFAULT_JUNIT_PLATFORM_VERSION}"
+            );
+            DEFAULT_JUNIT_PLATFORM_VERSION.to_string()
+        }),
+    };
+    let launcher_coordinate =
+        format!("org.junit.platform:junit-platform-console-standalone:{junit_version}");
+    let mut deps = split_cli_words(&cmd.deps);
+    deps.push(launcher_coordinate);
+
+    let (script, inferred_directory_sources) = expand_test_target(&cmd.script)?;
+    let mut extra_sources = split_cli_words(&cmd.sources);
+    extra_sources.extend(inferred_directory_sources);
+    extra_sources.extend(infer_test_companion_sources(&script));
+    dedupe_strings(&mut extra_sources);
+
+    let build = build_java(BuildOptions {
+        script,
+        extra_deps: deps,
+        extra_repos: split_cli_words(&cmd.repos),
+        extra_sources,
+        extra_files: split_cli_words(&cmd.files),
+        classpath: cmd.classpath,
+        javac_options: cmd.javac_options,
+        runtime_options: Vec::new(),
+        java_agents: split_cli_key_values(&cmd.java_agents),
+        java_version: cmd.java_version,
+        main_class: None,
+        cache_dir: cmd.cache_dir,
+        trust_remote: cmd.trust,
+    })?;
+
+    let launcher = build
+        .classpath
+        .iter()
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("junit-platform-console-standalone-"))
+        })
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("could not resolve junit-platform-console-standalone"))?;
+
+    let reports_dir = junit_reports_dir()?;
+    fs::create_dir_all(&reports_dir)?;
+    let mut runtime_cp = vec![build.classes_dir.clone()];
+    runtime_cp.extend(build.classpath.clone());
+
+    let jdk_root = juv::jdk::resolve_jdk(&build.directives.java_version, true)?;
+    let java = juv::jdk::java_bin_path(&jdk_root).display().to_string();
+    let mut java_cmd = ProcessCommand::new(&java);
+    for agent in &build.directives.java_agents {
+        java_cmd.arg(format_cli_java_agent(agent));
+    }
+    java_cmd.args(&build.directives.runtime_options);
+    java_cmd.args(&cmd.runtime_options);
+    java_cmd
+        .arg("-jar")
+        .arg(&launcher)
+        .arg("execute")
+        .arg("--class-path")
+        .arg(std::env::join_paths(&runtime_cp)?)
+        .arg("--scan-class-path")
+        .arg("--reports-dir")
+        .arg(&reports_dir);
+    if cmd.json || cmd.xml {
+        java_cmd.arg("--details=none").arg("--disable-banner");
+    }
+    java_cmd.args(&cmd.args);
+
+    let output = java_cmd
+        .output()
+        .with_context(|| format!("failed to execute {java}"))?;
+    let code = output.status.code().unwrap_or(1);
+    let xml = read_junit_xml_reports(&reports_dir)?;
+    let _ = fs::remove_dir_all(&reports_dir);
+
+    if (cmd.json || cmd.xml) && !output.status.success() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    if cmd.json {
+        let payload = junit_xml_to_json(&xml)?;
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else if cmd.xml {
+        print!("{xml}");
+    } else {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    Ok(code)
+}
+
+fn junit_reports_dir() -> Result<PathBuf> {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    Ok(std::env::temp_dir().join(format!("juv-junit-{}-{nanos}", std::process::id())))
+}
+
+fn read_junit_xml_reports(reports_dir: &Path) -> Result<String> {
+    let mut reports = fs::read_dir(reports_dir)?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "xml"))
+        .collect::<Vec<_>>();
+    reports.sort();
+    if reports.is_empty() {
+        return Ok(String::new());
+    }
+    if reports.len() == 1 {
+        return Ok(fs::read_to_string(&reports[0])?);
+    }
+    let mut xml = String::from("<testsuites>\n");
+    for report in reports {
+        let report_xml = fs::read_to_string(report)?;
+        xml.push_str(strip_xml_declaration(report_xml.trim_start()));
+        xml.push('\n');
+    }
+    xml.push_str("</testsuites>\n");
+    Ok(xml)
+}
+
+fn strip_xml_declaration(xml: &str) -> &str {
+    let Some(rest) = xml.strip_prefix("<?xml") else {
+        return xml;
+    };
+    rest.find("?>")
+        .map(|end| rest[end + 2..].trim_start())
+        .unwrap_or(xml)
+}
+
+fn junit_xml_to_json(xml: &str) -> Result<serde_json::Value> {
+    let suite_re = regex::Regex::new(r#"<testsuite\b([^>]*)>"#)?;
+    let case_re = regex::Regex::new(r#"(?s)<testcase\b([^>]*?)(?:/>|>(.*?)</testcase>)"#)?;
+    let mut tests = 0_u64;
+    let mut failures = 0_u64;
+    let mut errors = 0_u64;
+    let mut skipped = 0_u64;
+    let mut test_cases = Vec::new();
+
+    for captures in suite_re.captures_iter(xml) {
+        let attrs = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        tests += xml_attr(attrs, "tests")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        failures += xml_attr(attrs, "failures")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        errors += xml_attr(attrs, "errors")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        skipped += xml_attr(attrs, "skipped")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+    }
+
+    for captures in case_re.captures_iter(xml) {
+        let attrs = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let body = captures.get(2).map(|m| m.as_str()).unwrap_or_default();
+        let status = if body.contains("<failure") {
+            "failed"
+        } else if body.contains("<error") {
+            "errored"
+        } else if body.contains("<skipped") {
+            "skipped"
+        } else {
+            "passed"
+        };
+        test_cases.push(serde_json::json!({
+            "className": xml_attr(attrs, "classname").unwrap_or_default(),
+            "name": xml_attr(attrs, "name").unwrap_or_default(),
+            "time": xml_attr(attrs, "time").unwrap_or_default(),
+            "status": status,
+        }));
+    }
+
+    Ok(serde_json::json!({
+        "tests": tests,
+        "failures": failures,
+        "errors": errors,
+        "skipped": skipped,
+        "testCases": test_cases,
+    }))
+}
+
+fn xml_attr(attrs: &str, name: &str) -> Option<String> {
+    let mut rest = attrs.trim_start();
+    while !rest.is_empty() {
+        let eq = rest.find('=')?;
+        let attr_name = rest[..eq].trim();
+        let after_eq = rest[eq + 1..].trim_start();
+        let quote = after_eq.chars().next()?;
+        let (value, next) = if quote == '"' || quote == '\'' {
+            let value_start = quote.len_utf8();
+            match after_eq[value_start..].find(quote) {
+                Some(end) => {
+                    let value_end = value_start + end;
+                    (
+                        &after_eq[value_start..value_end],
+                        &after_eq[value_end + quote.len_utf8()..],
+                    )
+                }
+                None => return None,
+            }
+        } else {
+            let end = after_eq.find(char::is_whitespace).unwrap_or(after_eq.len());
+            (&after_eq[..end], &after_eq[end..])
+        };
+        if attr_name == name {
+            return Some(value.to_string());
+        }
+        rest = next.trim_start();
+    }
+    None
+}
+
+fn latest_cached_junit_platform_version(cache_dir: Option<&Path>) -> Result<String> {
+    let root = match cache_dir {
+        Some(path) => path.to_path_buf(),
+        None => default_cache_dir()?,
+    };
+    let metadata_dir = root.join("metadata");
+    let cache_file = metadata_dir.join("junit-platform-console-standalone.version");
+    if let Ok(metadata) = fs::metadata(&cache_file) {
+        if let Ok(modified) = metadata.modified() {
+            if SystemTime::now()
+                .duration_since(modified)
+                .map(|age| age.as_secs() < JUNIT_VERSION_CACHE_MAX_AGE_SECS)
+                .unwrap_or(false)
+            {
+                let cached = fs::read_to_string(&cache_file)?.trim().to_string();
+                if !cached.is_empty() {
+                    return Ok(cached);
+                }
+            }
+        }
+    }
+
+    let xml = ureq::get(
+        "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/maven-metadata.xml",
+    )
+    .call()
+    .context("failed to fetch JUnit Platform Maven metadata")?
+    .into_string()
+    .context("failed to read JUnit Platform Maven metadata")?;
+    let version = xml_tag(&xml, "release")
+        .or_else(|| xml_tag(&xml, "latest"))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("JUnit Platform Maven metadata did not include release/latest")
+        })?;
+    fs::create_dir_all(&metadata_dir)?;
+    fs::write(&cache_file, format!("{version}\n"))?;
+    Ok(version)
+}
+
+fn xml_tag(xml: &str, tag: &str) -> Option<String> {
+    let start = format!("<{tag}>");
+    let end = format!("</{tag}>");
+    let value_start = xml.find(&start)? + start.len();
+    let value_end = xml[value_start..].find(&end)? + value_start;
+    Some(xml[value_start..value_end].trim().to_string())
+}
+
+fn expand_test_target(path: &Path) -> Result<(PathBuf, Vec<String>)> {
+    if !path.is_dir() {
+        return Ok((path.to_path_buf(), Vec::new()));
+    }
+
+    let mut java_files = fs::read_dir(path)
+        .with_context(|| format!("failed to read test directory {}", path.display()))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|entry_path| entry_path.extension().is_some_and(|ext| ext == "java"))
+        .collect::<Vec<_>>();
+    java_files.sort();
+
+    let script = java_files
+        .iter()
+        .find(|entry_path| is_test_source(entry_path))
+        .or_else(|| java_files.first())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("no Java source files found in {}", path.display()))?;
+
+    let extra_sources = java_files
+        .into_iter()
+        .filter(|entry_path| entry_path != &script)
+        .filter_map(|entry_path| {
+            entry_path
+                .strip_prefix(path)
+                .ok()
+                .map(|entry_path| entry_path.to_string_lossy().to_string())
+        })
+        .collect();
+
+    Ok((script, extra_sources))
+}
+
+fn is_test_source(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| {
+            stem.ends_with("Test") || stem.ends_with("Tests") || stem.ends_with("IT")
+        })
+}
+
+fn infer_test_companion_sources(script: &Path) -> Vec<String> {
+    let Some(parent) = script.parent() else {
+        return Vec::new();
+    };
+    let Some(stem) = script.file_stem().and_then(|stem| stem.to_str()) else {
+        return Vec::new();
+    };
+    let candidates = [
+        stem.strip_suffix("Tests"),
+        stem.strip_suffix("Test"),
+        stem.strip_suffix("IT"),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .filter(|name| !name.is_empty())
+        .map(|name| parent.join(format!("{name}.java")))
+        .filter(|path| path.exists() && path != script)
+        .filter_map(|path| {
+            path.strip_prefix(parent)
+                .ok()
+                .map(|path| path.to_string_lossy().to_string())
+        })
+        .collect()
+}
+
+fn dedupe_strings(values: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    values.retain(|value| seen.insert(value.clone()));
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let code = match cli.command {
@@ -1786,6 +2218,7 @@ fn main() -> Result<()> {
             }
             0
         }
+        Some(Commands::Test(cmd)) => run_tests(cmd)?,
         Some(Commands::Juvx(cmd)) => run_juvx(cmd)?,
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
@@ -1836,4 +2269,19 @@ fn main() -> Result<()> {
         }
     };
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod test_command_unit_tests {
+    use super::*;
+
+    #[test]
+    fn xml_attr_preserves_quoted_values_with_spaces() {
+        let attrs = r#"classname="ExampleTest" name="[1] display name with spaces" time="0.001""#;
+        assert_eq!(
+            xml_attr(attrs, "name").as_deref(),
+            Some("[1] display name with spaces")
+        );
+        assert_eq!(xml_attr(attrs, "classname").as_deref(), Some("ExampleTest"));
+    }
 }
