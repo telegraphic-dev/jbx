@@ -203,8 +203,10 @@ struct TestCommand {
     xml: bool,
 
     /// JUnit Platform Console Standalone version to use.
-    #[arg(long = "junit-version", default_value = "1.11.4")]
-    junit_version: String,
+    ///
+    /// Defaults to the cached latest Maven Central release, refreshed periodically.
+    #[arg(long = "junit-version")]
+    junit_version: Option<String>,
 
     /// Additional dependency coordinates, same shape as //DEPS.
     #[arg(long = "deps")]
@@ -1410,19 +1412,33 @@ fn format_cli_java_agent(agent: &KeyValue) -> String {
     }
 }
 
+const DEFAULT_JUNIT_PLATFORM_VERSION: &str = "6.1.0";
+const JUNIT_VERSION_CACHE_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+
 fn run_tests(cmd: TestCommand) -> Result<i32> {
-    let launcher_coordinate = format!(
-        "org.junit.platform:junit-platform-console-standalone:{}",
-        cmd.junit_version
-    );
+    let junit_version = match cmd.junit_version.clone() {
+        Some(version) => version,
+        None => latest_cached_junit_platform_version(cmd.cache_dir.as_deref()).unwrap_or_else(|err| {
+            eprintln!(
+                "warning: could not determine latest JUnit Platform Console Standalone version: {err:#}; using {DEFAULT_JUNIT_PLATFORM_VERSION}"
+            );
+            DEFAULT_JUNIT_PLATFORM_VERSION.to_string()
+        }),
+    };
+    let launcher_coordinate =
+        format!("org.junit.platform:junit-platform-console-standalone:{junit_version}");
     let mut deps = split_cli_words(&cmd.deps);
     deps.push(launcher_coordinate);
+
+    let mut extra_sources = split_cli_words(&cmd.sources);
+    extra_sources.extend(infer_test_companion_sources(&cmd.script));
+    dedupe_strings(&mut extra_sources);
 
     let build = build_java(BuildOptions {
         script: cmd.script,
         extra_deps: deps,
         extra_repos: split_cli_words(&cmd.repos),
-        extra_sources: split_cli_words(&cmd.sources),
+        extra_sources,
         extra_files: split_cli_words(&cmd.files),
         classpath: cmd.classpath,
         javac_options: cmd.javac_options,
@@ -1479,6 +1495,10 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     let xml = read_junit_xml_reports(&reports_dir)?;
     let _ = fs::remove_dir_all(&reports_dir);
 
+    if (cmd.json || cmd.xml) && !output.status.success() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+
     if cmd.json {
         let payload = junit_xml_to_json(&xml)?;
         println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -1512,11 +1532,21 @@ fn read_junit_xml_reports(reports_dir: &Path) -> Result<String> {
     }
     let mut xml = String::from("<testsuites>\n");
     for report in reports {
-        xml.push_str(&fs::read_to_string(report)?);
+        let report_xml = fs::read_to_string(report)?;
+        xml.push_str(strip_xml_declaration(report_xml.trim_start()));
         xml.push('\n');
     }
     xml.push_str("</testsuites>\n");
     Ok(xml)
+}
+
+fn strip_xml_declaration(xml: &str) -> &str {
+    let Some(rest) = xml.strip_prefix("<?xml") else {
+        return xml;
+    };
+    rest.find("?>")
+        .map(|end| rest[end + 2..].trim_start())
+        .unwrap_or(xml)
 }
 
 fn junit_xml_to_json(xml: &str) -> Result<serde_json::Value> {
@@ -1574,10 +1604,95 @@ fn junit_xml_to_json(xml: &str) -> Result<serde_json::Value> {
 }
 
 fn xml_attr(attrs: &str, name: &str) -> Option<String> {
-    let pattern = format!(r#"\b{}="([^"]*)""#, regex::escape(name));
-    let re = regex::Regex::new(&pattern).ok()?;
-    re.captures(attrs)
-        .and_then(|captures| captures.get(1).map(|value| value.as_str().to_string()))
+    for attr in attrs.split_whitespace() {
+        let Some((attr_name, raw_value)) = attr.split_once('=') else {
+            continue;
+        };
+        if attr_name != name {
+            continue;
+        }
+        return Some(raw_value.trim_matches('"').trim_matches('\'').to_string());
+    }
+    None
+}
+
+fn latest_cached_junit_platform_version(cache_dir: Option<&Path>) -> Result<String> {
+    let root = match cache_dir {
+        Some(path) => path.to_path_buf(),
+        None => default_cache_dir()?,
+    };
+    let metadata_dir = root.join("metadata");
+    let cache_file = metadata_dir.join("junit-platform-console-standalone.version");
+    if let Ok(metadata) = fs::metadata(&cache_file) {
+        if let Ok(modified) = metadata.modified() {
+            if SystemTime::now()
+                .duration_since(modified)
+                .map(|age| age.as_secs() < JUNIT_VERSION_CACHE_MAX_AGE_SECS)
+                .unwrap_or(false)
+            {
+                let cached = fs::read_to_string(&cache_file)?.trim().to_string();
+                if !cached.is_empty() {
+                    return Ok(cached);
+                }
+            }
+        }
+    }
+
+    let xml = ureq::get(
+        "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/maven-metadata.xml",
+    )
+    .call()
+    .context("failed to fetch JUnit Platform Maven metadata")?
+    .into_string()
+    .context("failed to read JUnit Platform Maven metadata")?;
+    let version = xml_tag(&xml, "release")
+        .or_else(|| xml_tag(&xml, "latest"))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("JUnit Platform Maven metadata did not include release/latest")
+        })?;
+    fs::create_dir_all(&metadata_dir)?;
+    fs::write(&cache_file, format!("{version}\n"))?;
+    Ok(version)
+}
+
+fn xml_tag(xml: &str, tag: &str) -> Option<String> {
+    let start = format!("<{tag}>");
+    let end = format!("</{tag}>");
+    let value_start = xml.find(&start)? + start.len();
+    let value_end = xml[value_start..].find(&end)? + value_start;
+    Some(xml[value_start..value_end].trim().to_string())
+}
+
+fn infer_test_companion_sources(script: &Path) -> Vec<String> {
+    let Some(parent) = script.parent() else {
+        return Vec::new();
+    };
+    let Some(stem) = script.file_stem().and_then(|stem| stem.to_str()) else {
+        return Vec::new();
+    };
+    let candidates = [
+        stem.strip_suffix("Tests"),
+        stem.strip_suffix("Test"),
+        stem.strip_suffix("IT"),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .filter(|name| !name.is_empty())
+        .map(|name| parent.join(format!("{name}.java")))
+        .filter(|path| path.exists() && path != script)
+        .filter_map(|path| {
+            path.strip_prefix(parent)
+                .ok()
+                .map(|path| path.to_string_lossy().to_string())
+        })
+        .collect()
+}
+
+fn dedupe_strings(values: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    values.retain(|value| seen.insert(value.clone()));
 }
 
 fn main() -> Result<()> {
