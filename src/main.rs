@@ -1729,12 +1729,16 @@ fn formatter_error(file: &Path, output: std::process::Output) -> anyhow::Error {
 }
 
 fn is_compact_source(source: &str) -> bool {
-    source
-        .lines()
-        .any(|line| line.trim_start().starts_with("void main("))
-        && !source
-            .lines()
-            .any(|line| starts_with_java_type_declaration(line.trim_start()))
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("void main(") {
+            return true;
+        }
+        if starts_with_java_type_declaration(trimmed) {
+            return false;
+        }
+    }
+    false
 }
 
 fn starts_with_java_type_declaration(trimmed: &str) -> bool {

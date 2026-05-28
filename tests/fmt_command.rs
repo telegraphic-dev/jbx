@@ -174,7 +174,7 @@ fn fmt_wraps_compact_source_before_formatting_and_unwraps_afterwards() {
     let source = tmp.path().join("hello.java");
     fs::write(
         &source,
-        "//JAVA 25+\n//DEPS com.example:demo:1.0\nimport java.util.List;\nvoid main(){IO.println(\"hi\");}\n",
+        "//JAVA 25+\n//DEPS com.example:demo:1.0\nimport java.util.List;\nvoid main(){IO.println(\"hi\");}\nclass Helper {}\n",
     )
     .unwrap();
 
@@ -198,6 +198,7 @@ fn fmt_wraps_compact_source_before_formatting_and_unwraps_afterwards() {
         formatted.contains("void main() {\n    IO.println(\"hi\");\n}"),
         "{formatted}"
     );
+    assert!(formatted.contains("class Helper {}"), "{formatted}");
     assert!(!formatted.contains("__JuvFormatterWrapper"), "{formatted}");
 }
 
