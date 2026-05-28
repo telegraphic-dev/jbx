@@ -10,6 +10,7 @@ Implemented now:
 
 - `juv run <script.java> [args...]`
 - `juv build <script.java>`
+- `juv check [path...]` checks Java source files/directories with javac `-Xlint:all` and Error Prone by default
 - `juv init <script.java>` built-in Java template generation
 - `juv template list [--json]` list built-in and imported catalog init templates
 - `juv cache clear`
@@ -111,6 +112,14 @@ Not yet implemented: catalog remove for nested catalogs, multi-file template exp
 void main(String[] args) {
   IO.println("hello " + args[0]);
 }
+```
+
+```bash
+juv check
+# checks all Java files under the current directory with javac -Xlint:all and Error Prone
+
+juv check src --no-error-prone --json
+# structured javac diagnostics only
 ```
 
 ```bash
