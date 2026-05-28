@@ -7,7 +7,7 @@ repository = "https://github.com/telegraphic-dev/juv"
 license = "MIT"
 
 [lib]
-name = "juv"
+name = "jbx"
 
 [[bin]]
 name = "jbx"

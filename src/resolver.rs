@@ -1,4 +1,4 @@
-//! Native Maven dependency resolver for juv.
+//! Native Maven dependency resolver for jbx.
 //!
 //! Resolves `//DEPS` coordinates against Maven repositories without requiring
 //! Coursier on PATH. Implements a fixpoint resolution algorithm similar to
@@ -1232,7 +1232,7 @@ fn download_jar(
 
     // 2. Probe existing tool caches (Maven, Gradle, Coursier)
     if let Some(cached) = probe_local_caches(&artifact.module, &artifact.version, &jar_name) {
-        // Symlink from juv cache to the existing file
+        // Symlink from jbx cache to the existing file
         if let Some(parent) = jar_path.parent() {
             fs::create_dir_all(parent)?;
         }

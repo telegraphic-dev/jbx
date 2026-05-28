@@ -38,7 +38,7 @@ package dev.telegraphic.tool;
 
 public class Tool {
   public static void main(String[] args) {
-    System.out.println("juvx " + String.join(",", args));
+    System.out.println("jbx " + String.join(",", args));
   }
 }
 "#,
@@ -94,7 +94,7 @@ fn serve_files(files: HashMap<&'static str, Vec<u8>>) -> String {
 }
 
 #[test]
-fn jbx_runs_executable_jar_from_gav_without_juvx_subcommand() {
+fn jbx_runs_executable_jar_from_gav_shorthand() {
     let tmp = tempfile::tempdir().unwrap();
     let jar = build_executable_jar(&tmp);
     let pom = br#"
@@ -132,7 +132,7 @@ fn jbx_runs_executable_jar_from_gav_without_juvx_subcommand() {
     assert_success(&output);
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        "juvx jay,box"
+        "jbx jay,box"
     );
 }
 
@@ -175,7 +175,7 @@ fn jbx_runs_executable_jar_from_gav() {
     assert_success(&output);
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        "juvx alpha,beta"
+        "jbx alpha,beta"
     );
 
     let output = jbx_command()
@@ -192,7 +192,7 @@ fn jbx_runs_executable_jar_from_gav() {
         .expect("failed to run jbx Maven executable with --main after coordinate");
 
     assert_success(&output);
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "juvx gamma");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "jbx gamma");
 }
 
 #[test]
@@ -247,5 +247,5 @@ fn jbx_uses_latest_metadata_version_when_gav_version_is_omitted() {
         .expect("failed to run jbx with omitted coordinate version");
 
     assert_success(&output);
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "juvx delta");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "jbx delta");
 }

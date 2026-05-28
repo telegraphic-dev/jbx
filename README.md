@@ -77,7 +77,7 @@ Implemented now:
 - `jbx trust list`, `remove`, and `clear` manage trusted remote script entries
 - remote `http://` and `https://` scripts are downloaded into cache and require matching trust before build/run unless `--trust` is passed
 - remote relative `//SOURCES`, source-like `//DEPS`, and `//FILES` resources are downloaded next to the cached remote script
-- remote trust hashes cover those downloaded resources; legacy trust entries still work for scripts that do not declare relative resources
+- remote trust hashes cover those downloaded resources
 - `jbx info classpath` prints the script runtime classpath, with `--deps-only`
 - `jbx info tools` prints JSON metadata for tooling and supports selecting a single field
 - `jbx info docs` prints description and documentation references
@@ -91,7 +91,7 @@ Implemented now:
 - `jbx export local` creates runnable JARs whose manifest classpath points at local dependency paths
 - `jbx export portable` creates runnable JARs and copies file-based dependency classpath entries into sibling `lib/`
 - `jbx export native` compiles scripts then invokes GraalVM `native-image`, passing `//NATIVE_OPTIONS` plus `--native-option` values
-- `jbx publish --dry-run` reads `jbx.json` by default, falls back to `juv.json`, accepts flat `group` / `id` / `version` metadata, supports `--version` overrides, compiles/stages all declared Java sources including compact unnamed-class scripts, and writes a Maven repository-layout Central bundle with main, sources, generated javadoc when possible, POM, and required checksum artifacts
+- `jbx publish --dry-run` reads `jbx.json` by default, accepts flat `group` / `id` / `version` metadata, supports `--version` overrides, compiles/stages all declared Java sources including compact unnamed-class scripts, and writes a Maven repository-layout Central bundle with main, sources, generated javadoc when possible, POM, and required checksum artifacts
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath

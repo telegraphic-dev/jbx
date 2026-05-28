@@ -111,36 +111,6 @@ fn jdk_symlink_cache_avoids_re_search() {
         resolved.display()
     );
 }
-#[test]
-fn jdk_home_adopts_legacy_juv_cache_into_jbx_namespace() {
-    let tmp = tempfile::tempdir().unwrap();
-    let legacy = tmp.path().join("juv").join("jdks").join("42");
-    std::fs::create_dir_all(legacy.join("bin")).unwrap();
-    std::fs::write(legacy.join("bin").join("java"), "").unwrap();
-    std::fs::write(legacy.join("bin").join("javac"), "").unwrap();
-    std::fs::write(legacy.join("release"), "JAVA_VERSION=\"42\"\n").unwrap();
-
-    let output = jbx_command()
-        .env("XDG_CACHE_HOME", tmp.path())
-        .args(["jdk", "home", "42"])
-        .output()
-        .expect("failed to run jbx");
-
-    assert!(
-        output.status.success(),
-        "jbx jdk home 42 should adopt legacy juv cache:\nstdout={}\nstderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let jbx_link = tmp.path().join("jbx").join("jdks").join("42");
-    assert!(jbx_link.exists(), "jbx cache entry should be created");
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("jbx"),
-        "jdk home should return the new jbx cache path, got: {}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-}
-
 #[cfg(unix)]
 #[test]
 fn jdk_home_removes_stale_cache_entry_that_is_not_jdk_root() {

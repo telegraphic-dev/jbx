@@ -40,17 +40,6 @@ pub fn find_jdk(major_version: u32, auto_install: bool) -> anyhow::Result<PathBu
         let _ = remove_stale_cache_entry(&cached);
     }
 
-    // 1b. During the juv → jbx rebrand, adopt an existing valid juv JDK cache
-    // entry into the new jbx namespace instead of forcing a fresh download.
-    let legacy_cached = legacy_jdk_cache_dir()?.join(major_version.to_string());
-    if looks_like_jdk_root(&legacy_cached) {
-        let _ = create_symlink_dir(&legacy_cached, &cached);
-        if looks_like_jdk_root(&cached) {
-            return Ok(cached);
-        }
-        return Ok(legacy_cached);
-    }
-
     // 2. Scan all known locations, build a map of major → root
     let discovered = discover_all_jdks()?;
 
@@ -641,12 +630,6 @@ fn detect_platform() -> anyhow::Result<(&'static str, &'static str)> {
 fn jdk_cache_dir() -> anyhow::Result<PathBuf> {
     let cache = dirs::cache_dir().ok_or_else(|| anyhow!("cannot determine cache directory"))?;
     Ok(cache.join("jbx").join("jdks"))
-}
-
-/// The legacy juv JDK cache directory used before the jbx rebrand.
-fn legacy_jdk_cache_dir() -> anyhow::Result<PathBuf> {
-    let cache = dirs::cache_dir().ok_or_else(|| anyhow!("cannot determine cache directory"))?;
-    Ok(cache.join("juv").join("jdks"))
 }
 
 /// Get the java binary path for a JDK root.
