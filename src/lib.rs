@@ -1053,7 +1053,7 @@ fn insert_template_deps(content: &str, deps: &[String]) -> String {
 }
 
 fn render_header(options: &InitOptions, default_java: Option<&str>, out: &mut String) {
-    out.push_str("///usr/bin/env jbang \"$0\" \"$@\" ; exit $?\n");
+    out.push_str("///usr/bin/env juv \"$0\" \"$@\" ; exit $?\n");
     if let Some(version) = options.java_version.as_deref().or(default_java) {
         out.push_str(&format!("//JAVA {version}\n"));
     }

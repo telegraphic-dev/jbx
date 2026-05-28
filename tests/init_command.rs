@@ -28,7 +28,7 @@ fn init_creates_default_java_script_from_filename() {
 
     assert_success(&out);
     let content = fs::read_to_string(&script).unwrap();
-    assert!(content.starts_with("///usr/bin/env jbang"));
+    assert!(content.starts_with("///usr/bin/env juv"));
     assert!(content.contains("//JAVA 25+"));
     assert!(content.contains("void main(String... args)"));
     assert!(content.contains("IO.println(\"Hello World\")"));
