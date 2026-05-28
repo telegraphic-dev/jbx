@@ -399,6 +399,79 @@ public class Hello {
 }
 
 #[test]
+fn publish_resolves_sources_relative_to_descriptor_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source_dir = tmp.path().join("src/main/java/dev/telegraphic/demo/nested");
+    fs::create_dir_all(&source_dir).unwrap();
+    fs::write(
+        source_dir.join("Hello.java"),
+        r#"package dev.telegraphic.demo.nested;
+
+public class Hello {
+  public static void main(String[] args) {
+    System.out.println(Helper.message());
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        source_dir.join("Helper.java"),
+        r#"package dev.telegraphic.demo.nested;
+
+class Helper {
+  static String message() { return "nested"; }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "main": "src/main/java/dev/telegraphic/demo/nested/Hello.java",
+  "sources": ["src/main/java/dev/telegraphic/demo/nested/Helper.java"],
+  "group": "dev.telegraphic.demo",
+  "id": "nested",
+  "version": "1.0.0",
+  "description": "Nested tool",
+  "url": "https://github.com/telegraphic-dev/nested",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic"}],
+  "scm": {"connection": "scm:git:https://github.com/telegraphic-dev/nested.git", "url": "https://github.com/telegraphic-dev/nested"}
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("nested-bundle.zip");
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--file")
+        .arg(tmp.path().join("juv.json"))
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let base = "dev/telegraphic/demo/nested/1.0.0";
+    let sources_names = zip_names_from_bytes(zip_entry_bytes(
+        &bundle,
+        &format!("{base}/nested-1.0.0-sources.jar"),
+    ));
+    assert!(
+        sources_names.contains(&"dev/telegraphic/demo/nested/Helper.java".to_string()),
+        "{sources_names:?}"
+    );
+}
+
+#[test]
 fn publish_rejects_path_unsafe_coordinates() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(

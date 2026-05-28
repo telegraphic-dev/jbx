@@ -1981,6 +1981,7 @@ struct PublishScm {
 #[derive(Debug, Clone)]
 struct PublishDescriptor {
     script: PathBuf,
+    descriptor_dir: PathBuf,
     coordinates: PublishCoordinates,
     package_name: Option<String>,
     name: Option<String>,
@@ -2023,6 +2024,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     };
 
     let mut script = cmd.script.clone();
+    let mut descriptor_dir = PathBuf::from(".");
     let mut coordinates = None;
     let mut package_name = None;
     let mut name = None;
@@ -2042,6 +2044,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         let json: serde_json::Value = serde_json::from_str(&text)
             .with_context(|| format!("failed to parse descriptor {}", path.display()))?;
         let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        descriptor_dir = base_dir.to_path_buf();
         if script.is_none() {
             if let Some(main) = json.get("main").and_then(|value| value.as_str()) {
                 script = Some(base_dir.join(main));
@@ -2156,6 +2159,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     }
     Ok(PublishDescriptor {
         script,
+        descriptor_dir,
         coordinates,
         package_name,
         name,
@@ -2514,12 +2518,15 @@ fn stage_publish_sources(
     staging_dir: &Path,
 ) -> Result<StagedPublishSources> {
     let script = stage_publish_source_file(&descriptor.script, descriptor, staging_dir)?;
-    let base_dir = descriptor.script.parent().unwrap_or_else(|| Path::new("."));
     let mut extra_sources = Vec::new();
     let mut all_sources = vec![script.clone()];
     for source in &descriptor.sources {
-        let staged = stage_publish_source_file(&base_dir.join(source), descriptor, staging_dir)
-            .with_context(|| format!("failed to stage source {source}"))?;
+        let staged = stage_publish_source_file(
+            &resolve_descriptor_relative_path(&descriptor.descriptor_dir, source),
+            descriptor,
+            staging_dir,
+        )
+        .with_context(|| format!("failed to stage source {source}"))?;
         let absolute = staged.to_string_lossy().to_string();
         extra_sources.push(absolute);
         all_sources.push(staged);
@@ -2529,6 +2536,15 @@ fn stage_publish_sources(
         extra_sources,
         all_sources,
     })
+}
+
+fn resolve_descriptor_relative_path(base_dir: &Path, path: &str) -> PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    }
 }
 
 fn stage_publish_source_file(
