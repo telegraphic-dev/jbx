@@ -134,6 +134,58 @@ fn docs_remote_gav_fetches_markdown_sidecar_and_reuses_cache() {
 }
 
 #[test]
+fn docs_remote_group_artifact_resolves_latest_docs_sidecar() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (repo, requests) = serve_files(HashMap::from([
+        (
+            "/com/fasterxml/jackson/core/jackson-databind/maven-metadata.xml",
+            br#"<metadata>
+  <groupId>com.fasterxml.jackson.core</groupId>
+  <artifactId>jackson-databind</artifactId>
+  <versioning>
+    <release>2.17.2</release>
+    <versions>
+      <version>2.17.1</version>
+      <version>2.17.2</version>
+    </versions>
+  </versioning>
+</metadata>"#.to_vec(),
+        ),
+        (
+            "/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2-jbx-docs.md",
+            b"# Jackson Databind docs\n\nResolved latest sidecar.\n".to_vec(),
+        ),
+    ]));
+
+    let out = jbx_command()
+        .arg("docs")
+        .arg("com.fasterxml.jackson.core:jackson-databind")
+        .arg("--repo")
+        .arg(format!("local={repo}"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "# Jackson Databind docs\n\nResolved latest sidecar.\n"
+    );
+    let seen = requests.lock().unwrap();
+    assert!(
+        seen.iter().any(|path| path.as_str()
+            == "/com/fasterxml/jackson/core/jackson-databind/maven-metadata.xml"),
+        "expected latest-version metadata lookup: {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|path| path.as_str()
+            == "/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2-jbx-docs.md"),
+        "expected resolved latest docs sidecar fetch: {seen:?}"
+    );
+}
+
+#[test]
 fn docs_remote_gav_json_fetches_json_sidecar() {
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _) = serve_files(HashMap::from([(

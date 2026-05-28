@@ -1355,23 +1355,40 @@ fn run_docs(cmd: DocsCommand) -> Result<i32> {
 }
 
 fn looks_like_docs_coordinate(value: &str) -> bool {
+    let part_count = value.split(':').count();
     !value.starts_with("http://")
         && !value.starts_with("https://")
-        && value.split(':').count() == 3
+        && (part_count == 2 || part_count == 3)
         && value.split(':').all(|part| !part.is_empty())
 }
 
-fn parse_docs_coordinate(value: &str) -> Result<DocsCoordinate> {
-    let mut parts = value.split(':');
-    let group = parts.next().unwrap_or_default().to_string();
-    let id = parts.next().unwrap_or_default().to_string();
-    let version = parts.next().unwrap_or_default().to_string();
-    if parts.next().is_some() || group.is_empty() || id.is_empty() || version.is_empty() {
-        anyhow::bail!("docs requires Maven coordinates as group:artifact:version");
+fn parse_docs_coordinate(
+    value: &str,
+    repos: &[jbx::resolver::Repository],
+) -> Result<DocsCoordinate> {
+    let parts = value.split(':').collect::<Vec<_>>();
+    if parts.len() != 2 && parts.len() != 3 {
+        anyhow::bail!(
+            "docs requires Maven coordinates as group:artifact or group:artifact:version"
+        );
     }
+    let group = parts[0].to_string();
+    let id = parts[1].to_string();
     validate_group(&group)?;
     validate_path_safe_coordinate_part(&id, "id")?;
-    validate_path_safe_coordinate_part(&version, "version")?;
+    let version = match parts.get(2) {
+        Some(version) => {
+            validate_path_safe_coordinate_part(version, "version")?;
+            (*version).to_string()
+        }
+        None => jbx::resolver::resolve_latest_version(
+            &jbx::resolver::Module {
+                org: group.clone(),
+                name: id.clone(),
+            },
+            repos,
+        )?,
+    };
     Ok(DocsCoordinate { group, id, version })
 }
 
@@ -1495,7 +1512,8 @@ fn render_docs_markdown(
 }
 
 fn fetch_remote_docs(cmd: &DocsCommand) -> Result<String> {
-    let coordinate = parse_docs_coordinate(&cmd.target)?;
+    let repos = docs_repositories(&cmd.repos);
+    let coordinate = parse_docs_coordinate(&cmd.target, &repos)?;
     let extension = if cmd.json { "json" } else { "md" };
     let filename = format!(
         "{}-{}-jbx-docs.{extension}",
@@ -1515,7 +1533,6 @@ fn fetch_remote_docs(cmd: &DocsCommand) -> Result<String> {
         return fs::read_to_string(&cache_path)
             .with_context(|| format!("failed to read cached docs {}", cache_path.display()));
     }
-    let repos = docs_repositories(&cmd.repos);
     for repo in repos {
         let url = docs_artifact_url(&repo, &coordinate, &filename);
         match ureq::get(&url).call() {

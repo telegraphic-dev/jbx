@@ -38,7 +38,7 @@ Implemented now:
 - `jbx export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
 - `jbx publish [script.java] --file jbx.json --dry-run` prepares a Maven Central bundle ZIP using flat `group`/`id`/`version` metadata; `--version` overrides the descriptor version
 - `jbx publish [script.java] --file jbx.json --publish` signs the artifacts, uploads the bundle through the Maven Central Portal API, and waits for publication
-- `jbx docs <GAV|source|dir> [--json]` prints agent-friendly documentation; remote GAV sidecars are cached, local sources are generated fresh
+- `jbx docs <GAV|source|dir> [--json]` prints agent-friendly documentation; remote `group:artifact` resolves the latest release before fetching sidecars, remote GAV sidecars are cached, local sources are generated fresh
 - `jbx info classpath <script.java>`
 - `jbx info tools <script.java>` with `--select`
 - `jbx info docs <script.java>`
@@ -95,6 +95,7 @@ Implemented now:
 - `jbx publish --dry-run` reads `jbx.json` by default, accepts flat `group` / `id` / `version` metadata, supports `--version` overrides, compiles/stages all declared Java sources including compact unnamed-class scripts, and writes a Maven repository-layout Central bundle with main, sources, generated javadoc when possible, POM, `-jbx-docs.md` / `-jbx-docs.json` sidecars, and required checksum artifacts
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
 - `jbx docs <source|dir>` generates Markdown docs from local Java sources without writing cache entries
+- `jbx docs <group:artifact>` resolves the latest Maven release metadata before fetching `artifact-version-jbx-docs.md`
 - `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
