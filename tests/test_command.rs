@@ -204,6 +204,64 @@ class OtherTest {
 }
 
 #[test]
+fn test_runs_all_tests_in_directory_and_compiles_sources() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Calculator.java"),
+        r#"
+class Calculator {
+  static int add(int left, int right) {
+    return left + right;
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("CalculatorTest.java"),
+        r#"
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+class CalculatorTest {
+  @Test
+  void addsNumbers() {
+    assertEquals(9, Calculator.add(4, 5));
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("OtherTest.java"),
+        r#"
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class OtherTest {
+  @Test
+  void alsoRuns() {
+    assertTrue(true);
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = with_junit_version(juv_command().arg("test"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("CalculatorTest"), "stdout was {stdout}");
+    assert!(stdout.contains("OtherTest"), "stdout was {stdout}");
+}
+
+#[test]
 fn test_compiles_matching_source_for_test_script() {
     let tmp = tempfile::tempdir().unwrap();
     let main = tmp.path().join("Calculator.java");

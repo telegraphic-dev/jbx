@@ -1430,12 +1430,14 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     let mut deps = split_cli_words(&cmd.deps);
     deps.push(launcher_coordinate);
 
+    let (script, inferred_directory_sources) = expand_test_target(&cmd.script)?;
     let mut extra_sources = split_cli_words(&cmd.sources);
-    extra_sources.extend(infer_test_companion_sources(&cmd.script));
+    extra_sources.extend(inferred_directory_sources);
+    extra_sources.extend(infer_test_companion_sources(&script));
     dedupe_strings(&mut extra_sources);
 
     let build = build_java(BuildOptions {
-        script: cmd.script,
+        script,
         extra_deps: deps,
         extra_repos: split_cli_words(&cmd.repos),
         extra_sources,
@@ -1680,6 +1682,48 @@ fn xml_tag(xml: &str, tag: &str) -> Option<String> {
     let value_start = xml.find(&start)? + start.len();
     let value_end = xml[value_start..].find(&end)? + value_start;
     Some(xml[value_start..value_end].trim().to_string())
+}
+
+fn expand_test_target(path: &Path) -> Result<(PathBuf, Vec<String>)> {
+    if !path.is_dir() {
+        return Ok((path.to_path_buf(), Vec::new()));
+    }
+
+    let mut java_files = fs::read_dir(path)
+        .with_context(|| format!("failed to read test directory {}", path.display()))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|entry_path| entry_path.extension().is_some_and(|ext| ext == "java"))
+        .collect::<Vec<_>>();
+    java_files.sort();
+
+    let script = java_files
+        .iter()
+        .find(|entry_path| is_test_source(entry_path))
+        .or_else(|| java_files.first())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("no Java source files found in {}", path.display()))?;
+
+    let extra_sources = java_files
+        .into_iter()
+        .filter(|entry_path| entry_path != &script)
+        .filter_map(|entry_path| {
+            entry_path
+                .strip_prefix(path)
+                .ok()
+                .map(|entry_path| entry_path.to_string_lossy().to_string())
+        })
+        .collect();
+
+    Ok((script, extra_sources))
+}
+
+fn is_test_source(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| {
+            stem.ends_with("Test") || stem.ends_with("Tests") || stem.ends_with("IT")
+        })
 }
 
 fn infer_test_companion_sources(script: &Path) -> Vec<String> {
