@@ -430,6 +430,12 @@ struct TestCommand {
     #[arg(long = "coverage")]
     coverage: bool,
 
+    /// JaCoCo agent version to use when --coverage is enabled.
+    ///
+    /// Defaults to the built-in version (0.8.13).
+    #[arg(long = "jacoco-version", requires = "coverage")]
+    jacoco_version: Option<String>,
+
     /// JUnit Platform Console Standalone version to use.
     ///
     /// Defaults to the cached latest Maven Central release, refreshed periodically.
@@ -6668,7 +6674,7 @@ const JBX_CHECK_COMPILER_MAIN_CLASS: &str = "dev.telegraphic.jbx.check.JbxCheckC
 
 const JUNIT_GROUP_ID: &str = "org.junit.platform";
 const JUNIT_ARTIFACT_ID: &str = "junit-platform-console-standalone";
-const JACOCO_AGENT_COORDINATE: &str = "org.jacoco:org.jacoco.agent:runtime:0.8.13";
+const JACOCO_VERSION: &str = "0.8.13";
 const JACOCO_AGENT_PREFIX: &str = "org.jacoco.agent-";
 const JACOCO_COVERAGE_FILE: &str = "target/jacoco.exec";
 
@@ -6706,7 +6712,10 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     deps.extend(split_cli_words(&cmd.deps));
     deps.push(launcher_coordinate);
     if cmd.coverage {
-        deps.push(JACOCO_AGENT_COORDINATE.to_string());
+        let jacoco_version = cmd.jacoco_version.as_deref().unwrap_or(JACOCO_VERSION);
+        deps.push(format!(
+            "org.jacoco:org.jacoco.agent:runtime:{jacoco_version}"
+        ));
     }
     let mut repos = source_directives.repos;
     repos.extend(split_cli_words(&cmd.repos));

@@ -33,7 +33,7 @@ jbx <GAV|script.java> [args...]
 jbx run <script.java> [args...]
 jbx build <script.java>
 jbx check [path...] [--json]
-jbx test [script.java|directory] [--coverage]
+jbx test [script.java|directory] [--coverage] [--jacoco-version version]
 jbx fmt [path...]
 jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
 jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
