@@ -90,6 +90,8 @@ enum Commands {
     Test(TestCommand),
     /// Format Java source files with Palantir Java Format.
     Fmt(FmtCommand),
+    /// Dump or patch an OpenRewrite-derived AST graph.
+    Graph(GraphCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
 }
@@ -503,6 +505,48 @@ struct FmtCommand {
     /// Java source files or directories. Defaults to the current directory.
     #[arg(default_value = ".")]
     paths: Vec<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct GraphCommand {
+    #[command(subcommand)]
+    command: GraphSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum GraphSubcommand {
+    /// Print a stable, agent-friendly OpenRewrite AST graph for a Java source file.
+    Dump(GraphDumpCommand),
+    /// Apply checked graph edits through OpenRewrite and rewrite the Java source file.
+    Patch(GraphPatchCommand),
+}
+
+#[derive(Parser, Debug)]
+struct GraphDumpCommand {
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Java source file.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct GraphPatchCommand {
+    /// Expected graph hash from `jbx graph dump` output.
+    #[arg(long = "expect-graph-hash")]
+    expect_graph_hash: String,
+
+    /// Patch operation, e.g. set node="#literal-1" field="value" expect="old" value="new".
+    #[arg(long = "op")]
+    ops: Vec<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Java source file.
+    script: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -3445,6 +3489,11 @@ const PALANTIR_MAIN_CLASS: &str = "com.palantir.javaformat.java.Main";
 const COMPACT_WRAPPER_CLASS: &str = "__JuvFormatterWrapper";
 const PALANTIR_GROUP_ID: &str = "com.palantir.javaformat";
 const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
+const DEFAULT_OPENREWRITE_VERSION: &str = "8.83.4";
+const OPENREWRITE_GROUP_ID: &str = "org.openrewrite";
+const OPENREWRITE_ARTIFACT_ID: &str = "rewrite-java";
+const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
+const JBX_GRAPH_HELPER_SOURCE: &str = include_str!("graph_helper/JbxGraph.java");
 
 #[derive(Debug, Clone)]
 enum FormatterBackend {
@@ -3627,6 +3676,135 @@ fn cache_root(cache_dir: Option<&Path>) -> Result<PathBuf> {
         Some(path) => path.to_path_buf(),
         None => default_cache_dir()?,
     })
+}
+
+struct GraphBackend {
+    java: PathBuf,
+    classpath: Vec<PathBuf>,
+}
+
+fn run_graph_dump(cmd: GraphDumpCommand) -> Result<i32> {
+    let backend = resolve_graph_backend(cmd.cache_dir.as_deref())?;
+    let output = run_graph_helper(
+        &backend,
+        &["dump".to_string(), cmd.script.to_string_lossy().to_string()],
+    )?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(output.status.code().unwrap_or(1))
+}
+
+fn run_graph_patch(cmd: GraphPatchCommand) -> Result<i32> {
+    let backend = resolve_graph_backend(cmd.cache_dir.as_deref())?;
+    let mut args = vec![
+        "patch".to_string(),
+        cmd.script.to_string_lossy().to_string(),
+        "--expect-graph-hash".to_string(),
+        cmd.expect_graph_hash,
+    ];
+    for op in cmd.ops {
+        args.push("--op".to_string());
+        args.push(op);
+    }
+    let output = run_graph_helper(&backend, &args)?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(output.status.code().unwrap_or(1))
+}
+
+fn resolve_graph_backend(cache_dir: Option<&Path>) -> Result<GraphBackend> {
+    let repos = vec![jbx::resolver::Repository::central()];
+    let version = latest_cached_tool_version(
+        cache_dir,
+        OPENREWRITE_GROUP_ID,
+        OPENREWRITE_ARTIFACT_ID,
+        &repos,
+    )
+    .unwrap_or_else(|err| {
+        eprintln!(
+            "warning: could not determine latest OpenRewrite version: {err:#}; using {DEFAULT_OPENREWRITE_VERSION}"
+        );
+        DEFAULT_OPENREWRITE_VERSION.to_string()
+    });
+    let cache = cache_root(cache_dir)?.join("deps");
+    let coordinates = [
+        format!("org.openrewrite:rewrite-java:{version}"),
+        format!("org.openrewrite:rewrite-java-21:{version}"),
+    ];
+    let mut classpath = jbx::resolver::resolve_classpath(&coordinates, &repos, &cache)?;
+    let helper_classes = compile_graph_helper(cache_dir, &classpath)?;
+    classpath.insert(0, helper_classes);
+    let java = jbx::jdk::java_bin_path(&jbx::jdk::resolve_jdk(&None, true)?);
+    Ok(GraphBackend { java, classpath })
+}
+
+fn compile_graph_helper(
+    cache_dir: Option<&Path>,
+    dependency_classpath: &[PathBuf],
+) -> Result<PathBuf> {
+    let root = cache_root(cache_dir)?.join("graph");
+    let source_dir = root.join("src/dev/telegraphic/jbx/graph");
+    let source = source_dir.join("JbxGraph.java");
+    let classes = root.join("classes");
+    let stamp = root.join("helper.sha256");
+    let digest = format!(
+        "{:x}",
+        <sha2::Sha256 as sha2::Digest>::digest(JBX_GRAPH_HELPER_SOURCE.as_bytes())
+    );
+    let current = fs::read_to_string(&stamp).unwrap_or_default();
+    if classes
+        .join("dev/telegraphic/jbx/graph/JbxGraph.class")
+        .exists()
+        && current.trim() == digest
+    {
+        return Ok(classes);
+    }
+    if classes.exists() {
+        fs::remove_dir_all(&classes)?;
+    }
+    fs::create_dir_all(&source_dir)?;
+    fs::create_dir_all(&classes)?;
+    fs::write(&source, JBX_GRAPH_HELPER_SOURCE)?;
+    let jdk = jbx::jdk::resolve_jdk(&None, true)?;
+    let javac = jbx::jdk::javac_bin_path(&jdk);
+    let output = ProcessCommand::new(&javac)
+        .arg("--release")
+        .arg("17")
+        .arg("-cp")
+        .arg(std::env::join_paths(dependency_classpath)?)
+        .arg("-d")
+        .arg(&classes)
+        .arg(&source)
+        .output()
+        .with_context(|| format!("failed to execute {}", javac.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "failed to compile jbx graph OpenRewrite helper\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fs::write(&stamp, format!("{digest}\n"))?;
+    Ok(classes)
+}
+
+fn run_graph_helper(backend: &GraphBackend, args: &[String]) -> Result<std::process::Output> {
+    let mut command = ProcessCommand::new(&backend.java);
+    command
+        .arg("-cp")
+        .arg(
+            std::env::join_paths(&backend.classpath)
+                .context("failed to build graph helper classpath")?,
+        )
+        .arg(JBX_GRAPH_MAIN_CLASS)
+        .args(args);
+    command
+        .output()
+        .with_context(|| format!("failed to execute {}", backend.java.display()))
 }
 
 fn format_one_file(backend: &FormatterBackend, file: &Path, check: bool) -> Result<bool> {
@@ -6599,6 +6777,10 @@ fn main() -> Result<()> {
         Some(Commands::Check(cmd)) => run_check(cmd)?,
         Some(Commands::Test(cmd)) => run_tests(cmd)?,
         Some(Commands::Fmt(cmd)) => run_fmt(cmd)?,
+        Some(Commands::Graph(cmd)) => match cmd.command {
+            GraphSubcommand::Dump(cmd) => run_graph_dump(cmd)?,
+            GraphSubcommand::Patch(cmd) => run_graph_patch(cmd)?,
+        },
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
                 let jdks = jbx::jdk::list_jdks()?;

@@ -1,0 +1,96 @@
+use std::fs;
+use std::process::{Command, Output};
+
+fn jbx_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
+}
+
+fn assert_success(out: &Output) {
+    assert!(
+        out.status.success(),
+        "expected success\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn graph_hash(output: &str) -> String {
+    output
+        .lines()
+        .find_map(|line| line.strip_prefix("graph-hash "))
+        .expect("graph hash line")
+        .to_string()
+}
+
+#[test]
+fn graph_dump_prints_stable_agent_friendly_ast_nodes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("Example.java");
+    fs::write(
+        &source,
+        "class Example {\n    void main() {\n        String message = \"hello\";\n        IO.println(message);\n    }\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("jbx-graph v1\ngraph-hash "), "{stdout}");
+    assert!(stdout.contains("kind=class name=\"Example\""), "{stdout}");
+    assert!(stdout.contains("kind=method name=\"main\""), "{stdout}");
+    assert!(
+        stdout.contains("kind=variable name=\"message\""),
+        "{stdout}"
+    );
+    assert!(stdout.contains("kind=literal value=\"hello\""), "{stdout}");
+}
+
+#[test]
+fn graph_patch_updates_string_literal_through_openrewrite_ast() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("Example.java");
+    fs::write(
+        &source,
+        "class Example {\n    void main() {\n        String message = \"hello\";\n        IO.println(message);\n    }\n}\n",
+    )
+    .unwrap();
+
+    let dump = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_success(&dump);
+    let stdout = String::from_utf8_lossy(&dump.stdout);
+    let hash = graph_hash(&stdout);
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("patch")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg("--expect-graph-hash")
+        .arg(hash)
+        .arg("--op")
+        .arg("set node=\"#literal-1\" field=\"value\" expect=\"hello\" value=\"goodbye\"")
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let updated = fs::read_to_string(&source).unwrap();
+    assert!(updated.contains("\"goodbye\""), "{updated}");
+    assert!(!updated.contains("\"hello\""), "{updated}");
+}
