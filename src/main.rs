@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::{
+    collections::BTreeSet,
     fs,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
@@ -2068,6 +2069,7 @@ fn run_publish(mut cmd: PublishCommand) -> Result<i32> {
     if let Some(port) = cmd.serve {
         cmd.skip_signing = true;
         let repository = prepare_publish_repository(&descriptor, &cmd)?;
+        write_maven_metadata(&repository, &descriptor, "maven-metadata.xml", true)?;
         serve_maven_repository(&repository, port)?;
         return Ok(0);
     }
@@ -2132,6 +2134,7 @@ fn run_install(cmd: InstallCommand) -> Result<i32> {
     let repository = prepare_publish_repository(&descriptor, &publish_cmd)?;
     let destination = cmd_destination_or_maven_local(destination_arg)?;
     copy_dir_contents(&repository, &destination)?;
+    write_maven_metadata(&destination, &descriptor, "maven-metadata-local.xml", false)?;
     let installed = destination
         .join(descriptor.coordinates.group.replace('.', "/"))
         .join(&descriptor.coordinates.id)
@@ -2183,6 +2186,115 @@ fn copy_dir_contents(source: &Path, destination: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn write_maven_metadata(
+    repository: &Path,
+    descriptor: &PublishDescriptor,
+    file_name: &str,
+    checksums: bool,
+) -> Result<()> {
+    let artifact_dir = repository
+        .join(descriptor.coordinates.group.replace('.', "/"))
+        .join(&descriptor.coordinates.id);
+    fs::create_dir_all(&artifact_dir)?;
+    let metadata_path = artifact_dir.join(file_name);
+    let mut versions = metadata_path
+        .exists()
+        .then(|| fs::read_to_string(&metadata_path))
+        .transpose()?
+        .map(|text| maven_metadata_versions(&text))
+        .unwrap_or_default();
+    versions.insert(descriptor.coordinates.version.clone());
+    let metadata = render_maven_metadata(descriptor, &versions)?;
+    fs::write(&metadata_path, metadata)?;
+    if checksums {
+        write_checksums(&metadata_path)?;
+    }
+    Ok(())
+}
+
+fn maven_metadata_versions(text: &str) -> BTreeSet<String> {
+    let mut versions = BTreeSet::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<version>") {
+        rest = &rest[start + "<version>".len()..];
+        let Some(end) = rest.find("</version>") else {
+            break;
+        };
+        let version = rest[..end].trim();
+        if !version.is_empty() {
+            versions.insert(version.to_string());
+        }
+        rest = &rest[end + "</version>".len()..];
+    }
+    versions
+}
+
+fn render_maven_metadata(
+    descriptor: &PublishDescriptor,
+    versions: &BTreeSet<String>,
+) -> Result<String> {
+    let version = &descriptor.coordinates.version;
+    let last_updated = maven_last_updated_timestamp()?;
+    let mut rendered_versions = String::new();
+    for version in versions {
+        rendered_versions.push_str(&format!(
+            "\n      <version>{}</version>",
+            xml_escape(version)
+        ));
+    }
+    Ok(format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>{}</groupId>
+  <artifactId>{}</artifactId>
+  <versioning>
+    <latest>{}</latest>
+    <release>{}</release>
+    <versions>{}
+    </versions>
+    <lastUpdated>{}</lastUpdated>
+  </versioning>
+</metadata>
+"#,
+        xml_escape(&descriptor.coordinates.group),
+        xml_escape(&descriptor.coordinates.id),
+        xml_escape(version),
+        xml_escape(version),
+        rendered_versions,
+        last_updated
+    ))
+}
+
+fn maven_last_updated_timestamp() -> Result<String> {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before Unix epoch")?
+        .as_secs() as i64;
+    let days = seconds.div_euclid(86_400);
+    let seconds_of_day = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    Ok(format!(
+        "{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}"
+    ))
+}
+
+fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    (year, m as u32, d as u32)
 }
 
 fn serve_maven_repository(repository: &Path, port: u16) -> Result<()> {

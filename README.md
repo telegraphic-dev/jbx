@@ -95,8 +95,8 @@ Implemented now:
 - `jbx export native` compiles scripts then invokes GraalVM `native-image`, passing `//NATIVE_OPTIONS` plus `--native-option` values
 - `jbx publish --dry-run` reads `jbx.json` by default, accepts flat `group` / `id` / `version` metadata, supports `--version` overrides, compiles/stages all declared Java sources including compact unnamed-class scripts, and writes a Maven repository-layout Central bundle with main, sources, generated javadoc when possible, POM, and required checksum artifacts
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
-- `jbx publish --serve <port>` prepares the same Maven repository layout unsigned and serves it from `http://127.0.0.1:<port>/`; port `0` asks the OS to choose a free port
-- `jbx install` installs the current project into `~/.m2/repository` by default or another Maven-layout repository with `--destination` / `--to`
+- `jbx publish --serve <port>` prepares the same Maven repository layout unsigned and serves it from `http://127.0.0.1:<port>/`; port `0` asks the OS to choose a free port; it also serves artifact-level `maven-metadata.xml` plus checksums so version-less Maven lookups work
+- `jbx install` installs the current project into `~/.m2/repository` by default or another Maven-layout repository with `--destination` / `--to`; it updates `maven-metadata-local.xml` for the installed artifact
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies

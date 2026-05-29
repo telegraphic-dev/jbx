@@ -99,7 +99,61 @@ fn install_writes_current_project_to_selected_maven_repository_layout() {
     assert!(base.join("hello-tool-1.0.0-sources.jar").is_file());
     assert!(base.join("hello-tool-1.0.0-javadoc.jar").is_file());
     assert!(base.join("hello-tool-1.0.0.pom").is_file());
+    let metadata = fs::read_to_string(
+        destination.join("dev/telegraphic/demo/hello-tool/maven-metadata-local.xml"),
+    )
+    .unwrap();
+    assert!(metadata.contains("<latest>1.0.0</latest>"), "{metadata}");
+    assert!(metadata.contains("<release>1.0.0</release>"), "{metadata}");
+    assert!(metadata.contains("<version>1.0.0</version>"), "{metadata}");
     assert!(String::from_utf8_lossy(&out.stdout).contains(base.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn install_merges_existing_local_maven_metadata_versions() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_project(tmp.path());
+    let destination = tmp.path().join("repo");
+    let metadata_dir = destination.join("dev/telegraphic/demo/hello-tool");
+    fs::create_dir_all(&metadata_dir).unwrap();
+    fs::write(
+        metadata_dir.join("maven-metadata-local.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>dev.telegraphic.demo</groupId>
+  <artifactId>hello-tool</artifactId>
+  <versioning>
+    <latest>0.9.0</latest>
+    <release>0.9.0</release>
+    <versions>
+      <version>0.9.0</version>
+    </versions>
+    <lastUpdated>20250102030405</lastUpdated>
+  </versioning>
+</metadata>
+"#,
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("install")
+        .arg("--file")
+        .arg(tmp.path().join("jbx.json"))
+        .arg("--destination")
+        .arg(&destination)
+        .arg("--target-dir")
+        .arg(tmp.path().join("install-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let metadata = fs::read_to_string(metadata_dir.join("maven-metadata-local.xml")).unwrap();
+    assert!(metadata.contains("<latest>1.0.0</latest>"), "{metadata}");
+    assert!(metadata.contains("<release>1.0.0</release>"), "{metadata}");
+    assert!(metadata.contains("<version>0.9.0</version>"), "{metadata}");
+    assert!(metadata.contains("<version>1.0.0</version>"), "{metadata}");
 }
 
 #[test]
@@ -188,14 +242,36 @@ fn publish_serve_exposes_prepared_artifacts_over_maven_repository_layout() {
         .to_string();
 
     let pom_url = format!("{url}/dev/telegraphic/demo/hello-tool/1.0.0/hello-tool-1.0.0.pom");
+    let metadata_url = format!("{url}/dev/telegraphic/demo/hello-tool/maven-metadata.xml");
+    let metadata_sha1_url = format!("{metadata_url}.sha1");
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut pom = None;
+    let mut metadata = None;
+    let mut metadata_sha1 = None;
     while Instant::now() < deadline {
-        if let Ok(response) = ureq::get(&pom_url).call() {
-            if response.status() == 200 {
-                pom = Some(response.into_string().unwrap());
-                break;
+        if pom.is_none() {
+            if let Ok(response) = ureq::get(&pom_url).call() {
+                if response.status() == 200 {
+                    pom = Some(response.into_string().unwrap());
+                }
             }
+        }
+        if metadata.is_none() {
+            if let Ok(response) = ureq::get(&metadata_url).call() {
+                if response.status() == 200 {
+                    metadata = Some(response.into_string().unwrap());
+                }
+            }
+        }
+        if metadata_sha1.is_none() {
+            if let Ok(response) = ureq::get(&metadata_sha1_url).call() {
+                if response.status() == 200 {
+                    metadata_sha1 = Some(response.into_string().unwrap());
+                }
+            }
+        }
+        if pom.is_some() && metadata.is_some() && metadata_sha1.is_some() {
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -206,6 +282,13 @@ fn publish_serve_exposes_prepared_artifacts_over_maven_repository_layout() {
         "{pom}"
     );
     assert!(pom.contains("<artifactId>hello-tool</artifactId>"), "{pom}");
+    let metadata = metadata.unwrap_or_else(|| panic!("failed to fetch {metadata_url}"));
+    assert!(metadata.contains("<latest>1.0.0</latest>"), "{metadata}");
+    assert!(metadata.contains("<release>1.0.0</release>"), "{metadata}");
+    assert!(metadata.contains("<version>1.0.0</version>"), "{metadata}");
+    let metadata_sha1 =
+        metadata_sha1.unwrap_or_else(|| panic!("failed to fetch {metadata_sha1_url}"));
+    assert_eq!(metadata_sha1.trim().len(), 40, "{metadata_sha1}");
 }
 
 fn kill_child(child: &mut Child) {
