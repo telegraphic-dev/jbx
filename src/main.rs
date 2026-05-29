@@ -519,6 +519,24 @@ struct GraphCommand {
 
 #[derive(Parser, Debug)]
 struct RewriteCommand {
+    #[command(subcommand)]
+    command: RewriteSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum RewriteSubcommand {
+    /// Apply OpenRewrite recipes and modify sources.
+    Apply(RewriteRunCommand),
+    /// Preview OpenRewrite recipes and write rewrite/rewrite.patch without modifying sources.
+    Patch(RewriteRunCommand),
+    /// List standard OpenRewrite modules known by jbx.
+    Modules(RewriteModulesCommand),
+    /// List or search recipes available from an OpenRewrite module.
+    Recipes(RewriteRecipesCommand),
+}
+
+#[derive(Parser, Debug)]
+struct RewriteRunCommand {
     /// OpenRewrite recipe to run (short alias or fully-qualified recipe name). Repeatable and comma-splittable.
     #[arg(long = "recipe", value_delimiter = ',')]
     recipes: Vec<String>,
@@ -539,14 +557,6 @@ struct RewriteCommand {
     #[arg(long = "report", default_value = "rewrite")]
     report: PathBuf,
 
-    /// Apply changes. Without this flag jbx only writes rewrite/rewrite.patch.
-    #[arg(long = "apply", conflicts_with = "dry_run")]
-    apply: bool,
-
-    /// Preview changes without writing sources. This is the default.
-    #[arg(long = "dry-run")]
-    dry_run: bool,
-
     /// Print JSON summary after the human summary.
     #[arg(long = "json")]
     json: bool,
@@ -559,13 +569,58 @@ struct RewriteCommand {
     #[arg(long = "no-fail-on-invalid-recipes")]
     no_fail_on_invalid_recipes: bool,
 
-    /// Discover available recipes instead of running them.
-    #[arg(long = "discover")]
-    discover: bool,
+    /// Override dependency/helper cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
 
-    /// Include recipe descriptions and options with --discover.
+    /// Additional repository for recipe modules.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// OpenRewrite version for built-in modules.
+    #[arg(long = "rewrite-version", default_value = DEFAULT_OPENREWRITE_VERSION)]
+    rewrite_version: String,
+}
+
+#[derive(Parser, Debug)]
+struct RewriteModulesCommand {
+    /// Filter modules by short name, coordinate, or description.
+    #[arg(long = "search")]
+    search: Option<String>,
+
+    /// Maximum number of modules to print.
+    #[arg(long = "limit")]
+    limit: Option<usize>,
+
+    /// Print machine-readable JSON.
+    #[arg(long = "json")]
+    json: bool,
+
+    /// OpenRewrite version used when expanding short module names.
+    #[arg(long = "rewrite-version", default_value = DEFAULT_OPENREWRITE_VERSION)]
+    rewrite_version: String,
+}
+
+#[derive(Parser, Debug)]
+struct RewriteRecipesCommand {
+    /// OpenRewrite module to inspect (short name or full GAV).
+    module: String,
+
+    /// Filter recipes by short name, fully-qualified name, display name, or description.
+    #[arg(long = "search")]
+    search: Option<String>,
+
+    /// Maximum number of recipes to print.
+    #[arg(long = "limit")]
+    limit: Option<usize>,
+
+    /// Include recipe descriptions and options.
     #[arg(long = "detail")]
     detail: bool,
+
+    /// Print machine-readable JSON.
+    #[arg(long = "json")]
+    json: bool,
 
     /// Override dependency/helper cache directory.
     #[arg(long = "cache-dir")]
@@ -4059,14 +4114,22 @@ struct RewriteBackend {
 }
 
 fn run_rewrite(cmd: RewriteCommand) -> Result<i32> {
-    let backend = resolve_rewrite_backend(&cmd)?;
-    let mut args = Vec::new();
-    if cmd.discover {
-        args.push("--discover".to_string());
-        if cmd.detail {
-            args.push("--detail".to_string());
-        }
+    match cmd.command {
+        RewriteSubcommand::Apply(cmd) => run_rewrite_run(cmd, true),
+        RewriteSubcommand::Patch(cmd) => run_rewrite_run(cmd, false),
+        RewriteSubcommand::Modules(cmd) => run_rewrite_modules(cmd),
+        RewriteSubcommand::Recipes(cmd) => run_rewrite_recipes(cmd),
     }
+}
+
+fn run_rewrite_run(cmd: RewriteRunCommand, apply: bool) -> Result<i32> {
+    let backend = resolve_rewrite_backend(
+        &cmd.modules,
+        &cmd.repos,
+        cmd.cache_dir.as_deref(),
+        &cmd.rewrite_version,
+    )?;
+    let mut args = Vec::new();
     for recipe in &cmd.recipes {
         args.push("--recipe".to_string());
         args.push(rewrite_recipe_name(recipe).to_string());
@@ -4081,11 +4144,7 @@ fn run_rewrite(cmd: RewriteCommand) -> Result<i32> {
     }
     args.push("--report".to_string());
     args.push(cmd.report.to_string_lossy().to_string());
-    if cmd.apply {
-        args.push("--apply".to_string());
-    } else {
-        args.push("--dry-run".to_string());
-    }
+    args.push(if apply { "--apply" } else { "--dry-run" }.to_string());
     if cmd.json {
         args.push("--json".to_string());
     }
@@ -4095,8 +4154,78 @@ fn run_rewrite(cmd: RewriteCommand) -> Result<i32> {
     if cmd.no_fail_on_invalid_recipes {
         args.push("--no-fail-on-invalid-recipes".to_string());
     }
+    run_rewrite_helper_and_forward(&backend, &args)
+}
 
-    let output = run_rewrite_helper(&backend, &args)?;
+fn run_rewrite_modules(cmd: RewriteModulesCommand) -> Result<i32> {
+    let mut modules = rewrite_standard_modules()
+        .into_iter()
+        .filter(|module| rewrite_module_matches(module, cmd.search.as_deref()))
+        .collect::<Vec<_>>();
+    if let Some(limit) = cmd.limit {
+        modules.truncate(limit);
+    }
+    if cmd.json {
+        println!("[");
+        for (idx, module) in modules.iter().enumerate() {
+            let comma = if idx + 1 == modules.len() { "" } else { "," };
+            println!(
+                "  {{\"short\":\"{}\",\"coordinate\":\"{}\",\"description\":\"{}\"}}{}",
+                json_escape(module.short),
+                json_escape(&rewrite_module_coordinate(
+                    module.short,
+                    &cmd.rewrite_version
+                )),
+                json_escape(module.description),
+                comma
+            );
+        }
+        println!("]");
+    } else {
+        for module in modules {
+            println!(
+                "{:<20} {}",
+                module.short,
+                rewrite_module_coordinate(module.short, &cmd.rewrite_version)
+            );
+            println!("  {}", module.description);
+        }
+    }
+    Ok(0)
+}
+
+fn run_rewrite_recipes(cmd: RewriteRecipesCommand) -> Result<i32> {
+    let modules = vec![cmd.module.clone()];
+    let backend = resolve_rewrite_backend(
+        &modules,
+        &cmd.repos,
+        cmd.cache_dir.as_deref(),
+        &cmd.rewrite_version,
+    )?;
+    let mut args = vec!["--discover".to_string()];
+    for (short, fqn) in rewrite_recipe_aliases() {
+        args.push("--alias".to_string());
+        args.push(format!("{short}={fqn}"));
+    }
+    if let Some(search) = &cmd.search {
+        args.push("--search".to_string());
+        args.push(search.clone());
+    }
+    if let Some(limit) = cmd.limit {
+        args.push("--limit".to_string());
+        args.push(limit.to_string());
+    }
+    if cmd.detail {
+        args.push("--detail".to_string());
+    }
+    if cmd.json {
+        args.push("--json".to_string());
+    }
+    run_rewrite_helper_and_forward(&backend, &args)
+}
+
+fn run_rewrite_helper_and_forward(backend: &RewriteBackend, args: &[String]) -> Result<i32> {
+    let output = run_rewrite_helper(backend, args)?;
     print!("{}", String::from_utf8_lossy(&output.stdout));
     if !output.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
@@ -4104,27 +4233,23 @@ fn run_rewrite(cmd: RewriteCommand) -> Result<i32> {
     Ok(output.status.code().unwrap_or(1))
 }
 
-fn resolve_rewrite_backend(cmd: &RewriteCommand) -> Result<RewriteBackend> {
-    let repos = maven_tool::maven_repositories(&cmd.repos);
-    let cache = cache_root(cmd.cache_dir.as_deref())?;
+fn resolve_rewrite_backend(
+    modules: &[String],
+    repos: &[String],
+    cache_dir: Option<&Path>,
+    rewrite_version: &str,
+) -> Result<RewriteBackend> {
+    let repos = maven_tool::maven_repositories(repos);
+    let cache = cache_root(cache_dir)?;
     let deps_cache = cache.join("deps");
     let mut coordinates = BTreeSet::new();
-    coordinates.insert(format!(
-        "org.openrewrite:rewrite-core:{}",
-        cmd.rewrite_version
-    ));
-    coordinates.insert(format!(
-        "org.openrewrite:rewrite-java:{}",
-        cmd.rewrite_version
-    ));
-    coordinates.insert(format!(
-        "org.openrewrite:rewrite-java-21:{}",
-        cmd.rewrite_version
-    ));
+    coordinates.insert(format!("org.openrewrite:rewrite-core:{rewrite_version}"));
+    coordinates.insert(format!("org.openrewrite:rewrite-java:{rewrite_version}"));
+    coordinates.insert(format!("org.openrewrite:rewrite-java-21:{rewrite_version}"));
     coordinates.insert("org.slf4j:slf4j-api:2.0.17".to_string());
     coordinates.insert("org.slf4j:slf4j-nop:2.0.17".to_string());
-    for module in &cmd.modules {
-        coordinates.insert(rewrite_module_coordinate(module, &cmd.rewrite_version));
+    for module in modules {
+        coordinates.insert(rewrite_module_coordinate(module, rewrite_version));
     }
     let coordinate_vec = coordinates.into_iter().collect::<Vec<_>>();
     let mut classpath = jbx::resolver::resolve_classpath(&coordinate_vec, &repos, &deps_cache)?;
@@ -4135,6 +4260,73 @@ fn resolve_rewrite_backend(cmd: &RewriteCommand) -> Result<RewriteBackend> {
     Ok(RewriteBackend { java, classpath })
 }
 
+#[derive(Clone, Copy)]
+struct RewriteModuleInfo {
+    short: &'static str,
+    description: &'static str,
+}
+
+fn rewrite_standard_modules() -> Vec<RewriteModuleInfo> {
+    vec![
+        RewriteModuleInfo {
+            short: "java",
+            description: "Core Java recipes and Java source parser support.",
+        },
+        RewriteModuleInfo {
+            short: "java-21",
+            description: "JDK 21 Java parser artifact used by jbx by default.",
+        },
+        RewriteModuleInfo {
+            short: "xml",
+            description: "XML recipes and parser support.",
+        },
+        RewriteModuleInfo {
+            short: "yaml",
+            description: "YAML recipes and parser support.",
+        },
+        RewriteModuleInfo {
+            short: "properties",
+            description: "Java properties-file recipes and parser support.",
+        },
+        RewriteModuleInfo {
+            short: "json",
+            description: "JSON recipes and parser support.",
+        },
+        RewriteModuleInfo {
+            short: "maven",
+            description: "Maven POM recipes; opt-in only, not loaded by default.",
+        },
+        RewriteModuleInfo {
+            short: "gradle",
+            description: "Gradle build-file recipes.",
+        },
+        RewriteModuleInfo {
+            short: "groovy",
+            description: "Groovy recipes and parser support.",
+        },
+        RewriteModuleInfo {
+            short: "kotlin",
+            description: "Kotlin recipes and parser support.",
+        },
+        RewriteModuleInfo {
+            short: "protobuf",
+            description: "Protocol Buffers recipes and parser support.",
+        },
+        RewriteModuleInfo {
+            short: "hcl",
+            description: "HashiCorp Configuration Language recipes and parser support.",
+        },
+    ]
+}
+
+fn rewrite_module_matches(module: &RewriteModuleInfo, search: Option<&str>) -> bool {
+    let Some(search) = search else {
+        return true;
+    };
+    let haystack = format!("{} {}", module.short, module.description).to_lowercase();
+    haystack.contains(&search.to_lowercase())
+}
+
 fn rewrite_module_coordinate(module: &str, version: &str) -> String {
     if module.contains(':') {
         module.to_string()
@@ -4143,14 +4335,24 @@ fn rewrite_module_coordinate(module: &str, version: &str) -> String {
     }
 }
 
+fn rewrite_recipe_aliases() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("auto-format", "org.openrewrite.java.format.AutoFormat"),
+        ("format", "org.openrewrite.java.format.AutoFormat"),
+        ("cleanup", "org.openrewrite.java.cleanup.Cleanup"),
+        (
+            "remove-unused-imports",
+            "org.openrewrite.java.RemoveUnusedImports",
+        ),
+        ("change-package", "org.openrewrite.java.ChangePackage"),
+    ]
+}
+
 fn rewrite_recipe_name(recipe: &str) -> &str {
-    match recipe {
-        "auto-format" | "format" => "org.openrewrite.java.format.AutoFormat",
-        "cleanup" => "org.openrewrite.java.cleanup.Cleanup",
-        "remove-unused-imports" => "org.openrewrite.java.RemoveUnusedImports",
-        "change-package" => "org.openrewrite.java.ChangePackage",
-        other => other,
-    }
+    rewrite_recipe_aliases()
+        .into_iter()
+        .find_map(|(short, fqn)| (recipe == short).then_some(fqn))
+        .unwrap_or(recipe)
 }
 
 fn normalize_rewrite_option(option: &str, recipes: &[String]) -> Result<String> {
@@ -4169,6 +4371,10 @@ fn normalize_rewrite_option(option: &str, recipes: &[String]) -> Result<String> 
         raw_key
     };
     Ok(format!("{key}={value}"))
+}
+
+fn json_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn compile_rewrite_helper(
@@ -4193,6 +4399,9 @@ fn compile_rewrite_helper(
         return Ok(classes_dir);
     }
     fs::create_dir_all(source_path.parent().unwrap())?;
+    if classes_dir.exists() {
+        fs::remove_dir_all(&classes_dir)?;
+    }
     fs::create_dir_all(&classes_dir)?;
     fs::write(&source_path, JBX_REWRITE_HELPER_SOURCE)?;
     let javac = jbx::jdk::javac_bin_path(java_home);

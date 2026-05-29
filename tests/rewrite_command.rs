@@ -16,7 +16,7 @@ fn assert_success(out: &Output) {
 }
 
 #[test]
-fn rewrite_dry_run_writes_patch_without_changing_source() {
+fn rewrite_patch_writes_patch_without_changing_source() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("Example.java");
     let original = "class Example{void main(){System.out.println(\"hi\");}}\n";
@@ -24,6 +24,7 @@ fn rewrite_dry_run_writes_patch_without_changing_source() {
 
     let out = jbx_command()
         .arg("rewrite")
+        .arg("patch")
         .arg("--cache-dir")
         .arg(tmp.path().join("cache"))
         .arg("--recipe")
@@ -53,6 +54,7 @@ fn rewrite_apply_updates_source_and_accepts_module_shorthand() {
 
     let out = jbx_command()
         .arg("rewrite")
+        .arg("apply")
         .arg("--cache-dir")
         .arg(tmp.path().join("cache"))
         .arg("--module")
@@ -61,7 +63,6 @@ fn rewrite_apply_updates_source_and_accepts_module_shorthand() {
         .arg("auto-format")
         .arg("--source")
         .arg(&source)
-        .arg("--apply")
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -73,7 +74,7 @@ fn rewrite_apply_updates_source_and_accepts_module_shorthand() {
 }
 
 #[test]
-fn rewrite_passes_recipe_options_for_parameterized_recipes() {
+fn rewrite_apply_passes_recipe_options_for_parameterized_recipes() {
     let tmp = tempfile::tempdir().unwrap();
     let source_dir = tmp.path().join("src/main/java/com/old");
     fs::create_dir_all(&source_dir).unwrap();
@@ -86,6 +87,7 @@ fn rewrite_passes_recipe_options_for_parameterized_recipes() {
 
     let out = jbx_command()
         .arg("rewrite")
+        .arg("apply")
         .arg("--cache-dir")
         .arg(tmp.path().join("cache"))
         .arg("--recipe")
@@ -96,7 +98,6 @@ fn rewrite_passes_recipe_options_for_parameterized_recipes() {
         .arg("new=com.fresh")
         .arg("--source")
         .arg(tmp.path().join("src/main/java"))
-        .arg("--apply")
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -109,24 +110,46 @@ fn rewrite_passes_recipe_options_for_parameterized_recipes() {
 }
 
 #[test]
-fn rewrite_discovers_recipe_details() {
-    let tmp = tempfile::tempdir().unwrap();
+fn rewrite_modules_lists_and_searches_standard_modules() {
     let out = jbx_command()
         .arg("rewrite")
-        .arg("--cache-dir")
-        .arg(tmp.path().join("cache"))
-        .arg("--discover")
-        .arg("--detail")
-        .arg("--recipe")
-        .arg("auto-format")
+        .arg("modules")
+        .arg("--search")
+        .arg("maven")
+        .arg("--limit")
+        .arg("1")
+        .arg("--json")
         .output()
         .unwrap();
 
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"short\":\"maven\""), "{stdout}");
+    assert!(stdout.contains("org.openrewrite:rewrite-maven"), "{stdout}");
+}
+
+#[test]
+fn rewrite_recipes_lists_recipe_short_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = jbx_command()
+        .arg("rewrite")
+        .arg("recipes")
+        .arg("java")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg("--search")
+        .arg("auto-format")
+        .arg("--limit")
+        .arg("1")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"short\":\"auto-format\""), "{stdout}");
     assert!(
         stdout.contains("org.openrewrite.java.format.AutoFormat"),
         "{stdout}"
     );
-    assert!(stdout.contains("displayName:"), "{stdout}");
 }

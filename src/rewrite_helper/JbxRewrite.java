@@ -33,7 +33,7 @@ public class JbxRewrite {
         List<String> recipes = options.recipes.stream().map(JbxRewrite::recipeName).collect(Collectors.toList());
 
         if (options.discover) {
-            discover(baseEnvironment, recipes, options.detail);
+            discover(baseEnvironment, options);
             return;
         }
         if (recipes.isEmpty()) {
@@ -49,7 +49,12 @@ public class JbxRewrite {
             return;
         }
 
-        ExecutionContext ctx = new InMemoryExecutionContext(t -> System.err.println(t.getMessage()));
+        List<Throwable> executionErrors = new ArrayList<>();
+        ExecutionContext ctx = new InMemoryExecutionContext(t -> {
+            executionErrors.add(t);
+            System.err.println("Recipe execution error: " + t.getMessage());
+            t.printStackTrace(System.err);
+        });
         Path baseDir = Path.of(".").toAbsolutePath().normalize();
         List<SourceFile> sourceFiles = JavaParser.fromJavaVersion()
                 .classpath(List.<Path>of())
@@ -59,6 +64,9 @@ public class JbxRewrite {
                 .collect(Collectors.toList());
 
         List<Result> results = recipe.run(new InMemoryLargeSourceSet(sourceFiles), ctx).getChangeset().getAllResults();
+        if (!executionErrors.isEmpty()) {
+            throw new IllegalStateException("recipe execution failed with " + executionErrors.size() + " error(s)", executionErrors.get(0));
+        }
         writeReport(options.reportDirectory, results, baseDir);
         printSummary(results, options.reportDirectory);
         if (options.json) {
@@ -206,7 +214,7 @@ public class JbxRewrite {
     }
 
     private static String jsonEscape(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
     }
 
     private static void applyResults(List<Result> results, Path baseDir) throws IOException {
@@ -233,14 +241,26 @@ public class JbxRewrite {
         }
     }
 
-    private static void discover(Environment env, List<String> selectedRecipes, boolean detail) {
-        Set<String> selected = new TreeSet<>(selectedRecipes);
-        for (RecipeDescriptor descriptor : env.listRecipeDescriptors()) {
-            if (!selected.isEmpty() && !selected.contains(descriptor.getName())) {
-                continue;
+    private static void discover(Environment env, Options options) {
+        Set<String> selected = options.recipes.stream().map(JbxRewrite::recipeName).collect(Collectors.toCollection(TreeSet::new));
+        List<RecipeDescriptor> descriptors = env.listRecipeDescriptors().stream()
+                .filter(descriptor -> selected.isEmpty() || selected.contains(descriptor.getName()))
+                .filter(descriptor -> matchesSearch(descriptor, options))
+                .sorted((left, right) -> left.getName().compareTo(right.getName()))
+                .limit(options.limit < 0 ? Long.MAX_VALUE : options.limit)
+                .collect(Collectors.toList());
+        if (options.json) {
+            printRecipesJson(descriptors, options);
+            return;
+        }
+        for (RecipeDescriptor descriptor : descriptors) {
+            String alias = aliasFor(descriptor.getName(), options.aliases);
+            if (alias != null) {
+                System.out.println(alias + "\t" + descriptor.getName());
+            } else {
+                System.out.println(descriptor.getName());
             }
-            System.out.println(descriptor.getName());
-            if (detail) {
+            if (options.detail) {
                 System.out.println("  displayName: " + descriptor.getDisplayName());
                 if (descriptor.getDescription() != null && !descriptor.getDescription().isBlank()) {
                     System.out.println("  description: " + descriptor.getDescription());
@@ -252,11 +272,65 @@ public class JbxRewrite {
         }
     }
 
+    private static boolean matchesSearch(RecipeDescriptor descriptor, Options options) {
+        if (options.search == null || options.search.isBlank()) {
+            return true;
+        }
+        String needle = options.search.toLowerCase();
+        String alias = aliasFor(descriptor.getName(), options.aliases);
+        return descriptor.getName().toLowerCase().contains(needle)
+                || (alias != null && alias.toLowerCase().contains(needle))
+                || (descriptor.getDisplayName() != null && descriptor.getDisplayName().toLowerCase().contains(needle))
+                || (descriptor.getDescription() != null && descriptor.getDescription().toLowerCase().contains(needle));
+    }
+
+    private static String aliasFor(String recipe, Map<String, String> aliases) {
+        for (Map.Entry<String, String> entry : aliases.entrySet()) {
+            if (entry.getValue().equals(recipe)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
+    private static void printRecipesJson(List<RecipeDescriptor> descriptors, Options options) {
+        System.out.println("[");
+        for (int i = 0; i < descriptors.size(); i++) {
+            RecipeDescriptor descriptor = descriptors.get(i);
+            String alias = aliasFor(descriptor.getName(), options.aliases);
+            String comma = i + 1 == descriptors.size() ? "" : ",";
+            System.out.print("  {\"name\":\"" + jsonEscape(descriptor.getName()) + "\"");
+            if (alias != null) {
+                System.out.print(",\"short\":\"" + jsonEscape(alias) + "\"");
+            }
+            System.out.print(",\"displayName\":\"" + jsonEscape(nullToEmpty(descriptor.getDisplayName())) + "\"");
+            if (options.detail) {
+                System.out.print(",\"description\":\"" + jsonEscape(nullToEmpty(descriptor.getDescription())) + "\"");
+                System.out.print(",\"options\":[");
+                for (int j = 0; j < descriptor.getOptions().size(); j++) {
+                    OptionDescriptor option = descriptor.getOptions().get(j);
+                    String optionComma = j + 1 == descriptor.getOptions().size() ? "" : ",";
+                    System.out.print("{\"name\":\"" + jsonEscape(option.getName()) + "\",\"type\":\"" + jsonEscape(option.getType()) + "\",\"required\":" + option.isRequired() + "}" + optionComma);
+                }
+                System.out.print("]");
+            }
+            System.out.println("}" + comma);
+        }
+        System.out.println("]");
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
     private static final class Options {
         final List<String> recipes = new ArrayList<>();
         final List<Path> sources = new ArrayList<>();
         final Map<String, String> recipeOptions = new TreeMap<>();
+        final Map<String, String> aliases = new TreeMap<>();
         Path reportDirectory = Path.of("rewrite");
+        String search;
+        long limit = -1;
         boolean apply;
         boolean discover;
         boolean detail;
@@ -276,13 +350,28 @@ public class JbxRewrite {
                         if (equals <= 0) {
                             throw new IllegalArgumentException("--option must use key=value");
                         }
-                        options.recipeOptions.put(option.substring(0, equals), option.substring(equals + 1));
+                        String key = option.substring(0, equals);
+                        String value = option.substring(equals + 1);
+                        if (options.recipeOptions.containsKey(key)) {
+                            System.err.println("warning: duplicate --option key '" + key + "'; overriding previous value");
+                        }
+                        options.recipeOptions.put(key, value);
                     }
                     case "--report" -> options.reportDirectory = Path.of(args[++i]);
                     case "--apply" -> options.apply = true;
                     case "--dry-run" -> options.apply = false;
                     case "--discover" -> options.discover = true;
                     case "--detail" -> options.detail = true;
+                    case "--search" -> options.search = args[++i];
+                    case "--limit" -> options.limit = Long.parseLong(args[++i]);
+                    case "--alias" -> {
+                        String alias = args[++i];
+                        int equals = alias.indexOf('=');
+                        if (equals <= 0) {
+                            throw new IllegalArgumentException("--alias must use short=fully.qualified.Recipe");
+                        }
+                        options.aliases.put(alias.substring(0, equals), alias.substring(equals + 1));
+                    }
                     case "--json" -> options.json = true;
                     case "--fail-on-changes" -> options.failOnChanges = true;
                     case "--no-fail-on-invalid-recipes" -> options.failOnInvalidRecipes = false;
