@@ -49,7 +49,7 @@ Implemented now:
 - `jbx info compile-options|runtime-options|native-options|javaagents|manifest <script.java>`
 - `jbx <GAV|script.java> [args...]` run a Java script or Maven executable tool
 - `jbx --main <class> <GAV> -- [args...]` run a main class with the resolved classpath
-- `jbx search [text|group:artifact[:version>] [--group G] [--id A] [--limit N] [--json]` search Maven Central artifacts
+- `jbx search [text|group:artifact[:version]] [--group G] [--id A] [--limit N] [--json]` search Maven Central artifacts
 - directive parsing for:
   - `//JAVA`
   - `//DEPS`

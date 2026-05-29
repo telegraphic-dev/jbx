@@ -1613,13 +1613,14 @@ fn run_search(cmd: SearchCommand) -> Result<i32> {
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
+    let total_found_fallback = docs.len() as u64;
     let mut artifacts = docs.iter().map(search_doc_json).collect::<Vec<_>>();
     sort_search_artifacts_by_popularity(&mut artifacts);
     artifacts.truncate(cmd.limit);
     if cmd.json {
         let payload = serde_json::json!({
             "query": query,
-            "numFound": search_response.get("numFound").and_then(|value| value.as_u64()).unwrap_or(artifacts.len() as u64),
+            "numFound": search_response.get("numFound").and_then(|value| value.as_u64()).unwrap_or(total_found_fallback),
             "artifacts": artifacts,
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -1671,7 +1672,8 @@ fn maven_search_query(cmd: &SearchCommand) -> Result<(String, bool)> {
         if clauses.is_empty() {
             anyhow::bail!("search requires a query or at least one filter");
         }
-        return Ok((clauses.join(" AND "), cmd.version.is_some()));
+        let version_in_query = clauses.iter().any(|clause| clause.starts_with("v:"));
+        return Ok((clauses.join(" AND "), version_in_query));
     }
 
     if raw.trim().is_empty() {

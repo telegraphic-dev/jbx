@@ -165,3 +165,65 @@ fn search_accepts_solr_group_and_id_parameters() {
         "{request}"
     );
 }
+
+#[test]
+fn search_ignores_empty_version_filter_without_switching_to_gav_core() {
+    let (base, requests, handle) = serve_search_response(
+        r#"{
+  "response": {
+    "numFound": 1,
+    "docs": [
+      {"id":"io.micronaut:micronaut-core","g":"io.micronaut","a":"micronaut-core","latestVersion":"4.9.0","p":"jar","versionCount": 170}
+    ]
+  }
+}"#,
+    );
+
+    let output = jbx_command()
+        .arg("search")
+        .arg("--group")
+        .arg("io.micronaut")
+        .arg("--id")
+        .arg("micronaut-core")
+        .arg("--version")
+        .arg("")
+        .env("JBX_MAVEN_SEARCH_URL", base)
+        .output()
+        .expect("failed to run jbx search with empty version");
+
+    assert_success(&output);
+    let request = requests.recv().unwrap();
+    handle.join().unwrap();
+    assert!(!request.contains("core=gav"), "{request}");
+    assert!(!request.contains("v%3A"), "{request}");
+}
+
+#[test]
+fn search_json_num_found_fallback_uses_untruncated_docs() {
+    let (base, _requests, handle) = serve_search_response(
+        r#"{
+  "response": {
+    "docs": [
+      {"id":"com.example:one","g":"com.example","a":"one","latestVersion":"1.0.0","p":"jar","versionCount": 1},
+      {"id":"com.example:two","g":"com.example","a":"two","latestVersion":"1.0.0","p":"jar","versionCount": 2}
+    ]
+  }
+}"#,
+    );
+
+    let output = jbx_command()
+        .arg("search")
+        .arg("example")
+        .arg("--limit")
+        .arg("1")
+        .arg("--json")
+        .env("JBX_MAVEN_SEARCH_URL", base)
+        .output()
+        .expect("failed to run jbx search without numFound");
+
+    assert_success(&output);
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["numFound"], 2);
+    assert_eq!(payload["artifacts"].as_array().unwrap().len(), 1);
+    handle.join().unwrap();
+}
