@@ -40,6 +40,7 @@ Implemented now:
 - `jbx publish [script.java] --file jbx.json --publish` signs the artifacts, uploads the bundle through the Maven Central Portal API, and waits for publication
 - `jbx publish [script.java] --file jbx.json --serve <port>` serves the prepared artifact from a local Maven-compatible HTTP repository
 - `jbx install [script.java] --file jbx.json [--destination repo]` installs the artifact into a Maven repository layout; default destination is `~/.m2/repository`
+- `jbx docs <GAV|source|dir> [--json]` prints agent-friendly documentation; remote `group:artifact` resolves the latest release before fetching sidecars, remote GAV sidecars are cached, local sources are generated fresh
 - `jbx info classpath <script.java>`
 - `jbx info tools <script.java>` with `--select`
 - `jbx info docs <script.java>`
@@ -93,10 +94,13 @@ Implemented now:
 - `jbx export local` creates runnable JARs whose manifest classpath points at local dependency paths
 - `jbx export portable` creates runnable JARs and copies file-based dependency classpath entries into sibling `lib/`
 - `jbx export native` compiles scripts then invokes GraalVM `native-image`, passing `//NATIVE_OPTIONS` plus `--native-option` values
-- `jbx publish --dry-run` reads `jbx.json` by default, accepts flat `group` / `id` / `version` metadata, supports `--version` overrides, compiles/stages all declared Java sources including compact unnamed-class scripts, and writes a Maven repository-layout Central bundle with main, sources, generated javadoc when possible, POM, and required checksum artifacts
+- `jbx publish --dry-run` reads `jbx.json` by default, accepts flat `group` / `id` / `version` metadata, supports `--version` overrides, compiles/stages all declared Java sources including compact unnamed-class scripts, and writes a Maven repository-layout Central bundle with main, sources, generated javadoc when possible, POM, `-jbx-docs.md` / `-jbx-docs.json` sidecars, and required checksum artifacts
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
 - `jbx publish --serve <port>` prepares the same Maven repository layout unsigned and serves it from `http://127.0.0.1:<port>/`; port `0` asks the OS to choose a free port; it also serves artifact-level `maven-metadata.xml` plus checksums so version-less Maven lookups work
 - `jbx install` installs the current project into `~/.m2/repository` by default or another Maven-layout repository with `--destination` / `--to`; it updates `maven-metadata-local.xml` for the installed artifact
+- `jbx docs <source|dir>` generates Markdown docs from local Java sources without writing cache entries
+- `jbx docs <group:artifact>` resolves the latest Maven release metadata before fetching `artifact-version-jbx-docs.md`
+- `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace; see [`docs/jbx-docs-schema.md`](docs/jbx-docs-schema.md) for the JSON shape
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies; Maven coordinates may be `group:artifact:version`, `group:artifact:classifier:version`, or just `group:artifact` to resolve the latest release from Maven metadata

@@ -60,6 +60,8 @@ enum Commands {
     Publish(PublishCommand),
     /// Install the current project into a Maven repository layout.
     Install(InstallCommand),
+    /// Print agent-friendly documentation for source, directories, or Maven artifacts.
+    Docs(DocsCommand),
     /// Check Java source files with javac diagnostics and Error Prone by default.
     Check(CheckCommand),
     /// Initialize a Java script.
@@ -216,6 +218,28 @@ struct BuildCommand {
 
     /// Java source file.
     script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct DocsCommand {
+    /// Maven GAV, Java source file, docs sidecar, or directory to document.
+    target: String,
+
+    /// Print JSON instead of Markdown.
+    #[arg(long = "json")]
+    json: bool,
+
+    /// Additional repository for remote Maven docs sidecars (id=url format or bare URL).
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Limit structured output to matching type names. Repeatable; accepts simple or fully-qualified names.
+    #[arg(long = "type", alias = "types")]
+    types: Vec<String>,
+
+    /// Override remote docs cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug)]
@@ -1350,6 +1374,1826 @@ fn print_required(value: Option<&str>, missing: &str) -> Result<()> {
 fn parsed_directives(script: &PathBuf) -> Result<jbx::Directives> {
     let source = fs::read_to_string(script)?;
     Ok(jbx::parse_directives(&source))
+}
+
+#[derive(Debug, Clone)]
+struct DocsCoordinate {
+    group: String,
+    id: String,
+    version: String,
+}
+
+fn run_docs(cmd: DocsCommand) -> Result<i32> {
+    let target_path = PathBuf::from(&cmd.target);
+    let output = if target_path.exists() {
+        render_local_docs(&target_path, cmd.json, &cmd.types)?
+    } else if looks_like_docs_coordinate(&cmd.target) {
+        fetch_remote_docs(&cmd)?
+    } else {
+        anyhow::bail!("docs target not found: {}", cmd.target);
+    };
+    print!("{output}");
+    Ok(0)
+}
+
+fn looks_like_docs_coordinate(value: &str) -> bool {
+    let part_count = value.split(':').count();
+    !value.starts_with("http://")
+        && !value.starts_with("https://")
+        && (part_count == 2 || part_count == 3)
+        && value.split(':').all(|part| !part.is_empty())
+}
+
+fn parse_docs_coordinate(
+    value: &str,
+    repos: &[jbx::resolver::Repository],
+) -> Result<DocsCoordinate> {
+    let parts = value.split(':').collect::<Vec<_>>();
+    if parts.len() != 2 && parts.len() != 3 {
+        anyhow::bail!(
+            "docs requires Maven coordinates as group:artifact or group:artifact:version"
+        );
+    }
+    let group = parts[0].to_string();
+    let id = parts[1].to_string();
+    validate_group(&group)?;
+    validate_path_safe_coordinate_part(&id, "id")?;
+    let version = match parts.get(2) {
+        Some(version) => {
+            validate_path_safe_coordinate_part(version, "version")?;
+            (*version).to_string()
+        }
+        None => jbx::resolver::resolve_latest_version(
+            &jbx::resolver::Module {
+                org: group.clone(),
+                name: id.clone(),
+            },
+            repos,
+        )?,
+    };
+    Ok(DocsCoordinate { group, id, version })
+}
+
+fn render_local_docs(path: &Path, json: bool, type_filters: &[String]) -> Result<String> {
+    if is_jar_file(path) {
+        return render_jar_docs(path, json, type_filters);
+    }
+    let sources = collect_java_files(&[path.to_path_buf()])?;
+    if sources.is_empty() {
+        anyhow::bail!(
+            "docs target contains no Java source files: {}",
+            path.display()
+        );
+    }
+    let docs = sources
+        .iter()
+        .map(|source| docs_source_json(source, None))
+        .collect::<Result<Vec<_>>>()?;
+    let types = filter_docs_types(extract_docs_types_from_sources(&sources)?, type_filters);
+    let title = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| path.to_str().unwrap_or("docs"));
+    if json {
+        Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+                "target": path.to_string_lossy(),
+                "sources": docs,
+                "types": types,
+                "generatedFrom": {
+                    "source": "jbx-directives",
+                    "jbxVersion": env!("CARGO_PKG_VERSION"),
+                }
+            }))?
+        ))
+    } else {
+        render_docs_markdown(title, None, &docs, &types)
+    }
+}
+
+fn docs_source_json(source: &Path, artifact: Option<&DocsCoordinate>) -> Result<serde_json::Value> {
+    let directives = parsed_directives(&source.to_path_buf())?;
+    let name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("source");
+    let docs = directives
+        .docs
+        .iter()
+        .map(|doc| match &doc.value {
+            Some(value) => serde_json::json!({"key": doc.key, "value": value}),
+            None => serde_json::json!({"key": doc.key}),
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "path": source.to_string_lossy(),
+        "name": name,
+        "description": directives.description,
+        "docs": docs,
+        "dependencies": directives.deps,
+        "repositories": directives.repos,
+        "sources": directives.sources,
+        "java": directives.java_version,
+        "main": directives.main_class,
+        "artifact": artifact.map(|coordinate| serde_json::json!({
+            "group": coordinate.group,
+            "id": coordinate.id,
+            "version": coordinate.version,
+            "coordinate": format!("{}:{}:{}", coordinate.group, coordinate.id, coordinate.version),
+        })),
+    }))
+}
+
+fn render_docs_markdown(
+    title: &str,
+    artifact: Option<&DocsCoordinate>,
+    sources: &[serde_json::Value],
+    types: &[serde_json::Value],
+) -> Result<String> {
+    let mut out = String::new();
+    out.push_str(&format!("# {title}\n\n"));
+    if let Some(coordinate) = artifact {
+        out.push_str(&format!(
+            "Artifact: `{}:{}:{}`\n\n",
+            coordinate.group, coordinate.id, coordinate.version
+        ));
+    }
+    for source in sources {
+        let name = source
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("source");
+        if sources.len() > 1 || artifact.is_some() {
+            out.push_str(&format!("## {name}\n\n"));
+        }
+        if let Some(description) = source.get("description").and_then(|value| value.as_str()) {
+            out.push_str(description);
+            out.push_str("\n\n");
+        }
+        if let Some(docs) = source.get("docs").and_then(|value| value.as_array()) {
+            for doc in docs {
+                let key = doc
+                    .get("key")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                match doc.get("value").and_then(|value| value.as_str()) {
+                    Some(value) => out.push_str(&format!("- {key}: {value}\n")),
+                    None => out.push_str(&format!("- {key}\n")),
+                }
+            }
+            if !docs.is_empty() {
+                out.push('\n');
+            }
+        }
+        if let Some(deps) = source
+            .get("dependencies")
+            .and_then(|value| value.as_array())
+        {
+            if !deps.is_empty() {
+                out.push_str("Dependencies:\n");
+                for dep in deps.iter().filter_map(|value| value.as_str()) {
+                    out.push_str(&format!("- `{dep}`\n"));
+                }
+                out.push('\n');
+            }
+        }
+    }
+    for ty in types {
+        if let Some(qualified_name) = ty.get("qualifiedName").and_then(|value| value.as_str()) {
+            out.push_str(&format!("## `{qualified_name}`\n\n"));
+            if let Some(kind) = ty.get("kind").and_then(|value| value.as_str()) {
+                out.push_str(&format!("Kind: {kind}\n\n"));
+            }
+            if let Some(description) = ty.get("description").and_then(|value| value.as_str()) {
+                if !description.is_empty() {
+                    out.push_str(description);
+                    out.push_str("\n\n");
+                }
+            }
+            render_examples_section(&mut out, ty.get("examples"));
+            render_member_section(&mut out, "Fields", ty.get("fields"), render_field_signature);
+            render_member_section(
+                &mut out,
+                "Constructors",
+                ty.get("constructors"),
+                render_constructor_signature,
+            );
+            render_member_section(
+                &mut out,
+                "Methods",
+                ty.get("methods"),
+                render_method_signature,
+            );
+        }
+    }
+    Ok(out)
+}
+
+fn render_examples_section(out: &mut String, value: Option<&serde_json::Value>) {
+    let Some(examples) = value.and_then(|value| value.as_array()) else {
+        return;
+    };
+    let examples = examples
+        .iter()
+        .filter_map(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>();
+    if examples.is_empty() {
+        return;
+    }
+    out.push_str("### Examples\n\n");
+    for example in examples {
+        out.push_str("```java\n");
+        out.push_str(example.trim());
+        out.push_str("\n```\n\n");
+    }
+}
+
+fn render_member_section(
+    out: &mut String,
+    title: &str,
+    value: Option<&serde_json::Value>,
+    render: fn(&serde_json::Value) -> Option<String>,
+) {
+    let Some(members) = value.and_then(|value| value.as_array()) else {
+        return;
+    };
+    if members.iter().filter_map(render).next().is_none() {
+        return;
+    }
+    out.push_str(&format!("### {title}\n\n"));
+    for member in members {
+        let Some(signature) = render(member) else {
+            continue;
+        };
+        out.push_str(&format!("- `{signature}`"));
+        if let Some(description) = member.get("description").and_then(|value| value.as_str()) {
+            if !description.trim().is_empty() {
+                out.push_str(&format!(" — {}", inline_markdown(description)));
+            }
+        }
+        out.push('\n');
+        render_parameter_descriptions(out, member);
+        if let Some(description) = member
+            .get("returnDescription")
+            .and_then(|value| value.as_str())
+        {
+            if !description.trim().is_empty() {
+                out.push_str(&format!("  - Returns: {}\n", inline_markdown(description)));
+            }
+        }
+    }
+    out.push('\n');
+}
+
+fn render_parameter_descriptions(out: &mut String, member: &serde_json::Value) {
+    let Some(parameters) = member.get("parameters").and_then(|value| value.as_array()) else {
+        return;
+    };
+    for parameter in parameters {
+        let Some(description) = parameter
+            .get("description")
+            .and_then(|value| value.as_str())
+        else {
+            continue;
+        };
+        if description.trim().is_empty() {
+            continue;
+        }
+        let name = parameter
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("parameter");
+        out.push_str(&format!("  - `{name}`: {}\n", inline_markdown(description)));
+    }
+}
+
+fn inline_markdown(markdown: &str) -> String {
+    markdown.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn render_field_signature(field: &serde_json::Value) -> Option<String> {
+    let name = field.get("name")?.as_str()?;
+    let ty = field.get("type")?.as_str()?;
+    Some(join_signature_parts(&[
+        member_modifiers(field),
+        ty.to_string(),
+        name.to_string(),
+    ]))
+}
+
+fn render_constructor_signature(constructor: &serde_json::Value) -> Option<String> {
+    let name = constructor.get("name")?.as_str()?;
+    Some(render_callable_signature(None, name, constructor))
+}
+
+fn render_method_signature(method: &serde_json::Value) -> Option<String> {
+    let name = method.get("name")?.as_str()?;
+    let return_type = method.get("returnType")?.as_str().unwrap_or("void");
+    Some(render_callable_signature(Some(return_type), name, method))
+}
+
+fn render_callable_signature(
+    return_type: Option<&str>,
+    name: &str,
+    member: &serde_json::Value,
+) -> String {
+    let mut head = Vec::new();
+    if let Some(return_type) = return_type {
+        head.push(return_type.to_string());
+    }
+    head.push(format!(
+        "{name}({})",
+        render_parameters(member.get("parameters"))
+    ));
+    let mut signature = join_signature_parts(&head);
+    if let Some(throws) = render_throws(member.get("throws")) {
+        signature.push_str(" throws ");
+        signature.push_str(&throws);
+    }
+    signature
+}
+
+fn member_modifiers(member: &serde_json::Value) -> String {
+    member
+        .get("modifiers")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default()
+}
+
+fn render_parameters(value: Option<&serde_json::Value>) -> String {
+    value
+        .and_then(|value| value.as_array())
+        .map(|params| {
+            params
+                .iter()
+                .filter_map(|param| {
+                    Some(format!(
+                        "{} {}",
+                        param.get("type")?.as_str()?,
+                        param.get("name")?.as_str()?
+                    ))
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
+}
+
+fn render_throws(value: Option<&serde_json::Value>) -> Option<String> {
+    let throws = value
+        .and_then(|value| value.as_array())?
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    (!throws.is_empty()).then(|| throws.join(", "))
+}
+
+fn join_signature_parts(parts: &[String]) -> String {
+    parts
+        .iter()
+        .filter(|part| !part.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+fn is_jar_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("jar"))
+}
+
+fn render_jar_docs(path: &Path, json: bool, type_filters: &[String]) -> Result<String> {
+    let docs_source = if find_javadoc_jar(path).is_some() {
+        "javadoc"
+    } else {
+        "javap"
+    };
+    let types = filter_docs_types(extract_docs_types_from_jar(path)?, type_filters);
+    let title = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| path.to_str().unwrap_or("jar"));
+    if json {
+        Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+                "target": path.to_string_lossy(),
+                "types": types,
+                "generatedFrom": {
+                    "source": docs_source,
+                    "jbxVersion": env!("CARGO_PKG_VERSION"),
+                }
+            }))?
+        ))
+    } else {
+        render_docs_markdown(title, None, &[], &types)
+    }
+}
+
+fn extract_docs_types_from_sources(sources: &[PathBuf]) -> Result<Vec<serde_json::Value>> {
+    let mut types = Vec::new();
+    for source in sources {
+        let content = fs::read_to_string(source)
+            .with_context(|| format!("failed to read Java source {}", source.display()))?;
+        types.extend(extract_docs_types_from_source(&content));
+    }
+    Ok(types)
+}
+
+fn extract_docs_types_from_source(content: &str) -> Vec<serde_json::Value> {
+    let package = parse_java_package(content).unwrap_or_default();
+    let mut types = Vec::new();
+    let mut pending_annotations = Vec::new();
+    let mut current: Option<DocsTypeBuilder> = None;
+    let mut brace_depth = 0_i32;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty()
+            || line.starts_with("//")
+            || line.starts_with("/*")
+            || line.starts_with('*')
+        {
+            continue;
+        }
+        if line.starts_with('@') {
+            pending_annotations.push(parse_annotation(line, &package));
+            continue;
+        }
+        if current.is_none() {
+            if let Some(builder) =
+                parse_type_declaration(line, &package, std::mem::take(&mut pending_annotations))
+            {
+                current = Some(builder);
+                brace_depth += count_char(line, '{') - count_char(line, '}');
+            } else {
+                pending_annotations.clear();
+            }
+            continue;
+        }
+        brace_depth += count_char(line, '{') - count_char(line, '}');
+        if let Some(builder) = current.as_mut() {
+            if let Some(member) = parse_member_declaration(
+                line,
+                &package,
+                &builder.name,
+                std::mem::take(&mut pending_annotations),
+            ) {
+                builder.push_member(member);
+            } else if !line.starts_with('@') {
+                pending_annotations.clear();
+            }
+        }
+        if brace_depth <= 0 {
+            if let Some(builder) = current.take() {
+                types.push(builder.into_json());
+            }
+            pending_annotations.clear();
+            brace_depth = 0;
+        }
+    }
+    if let Some(builder) = current {
+        types.push(builder.into_json());
+    }
+    types
+}
+
+#[derive(Debug)]
+struct DocsTypeBuilder {
+    kind: String,
+    name: String,
+    qualified_name: String,
+    package: String,
+    visibility: String,
+    modifiers: Vec<String>,
+    annotations: Vec<serde_json::Value>,
+    description: Option<String>,
+    examples: Vec<String>,
+    extends: Option<String>,
+    implements: Vec<String>,
+    fields: Vec<serde_json::Value>,
+    constructors: Vec<serde_json::Value>,
+    methods: Vec<serde_json::Value>,
+}
+
+impl DocsTypeBuilder {
+    fn push_member(&mut self, member: DocsMember) {
+        match member {
+            DocsMember::Field(value) => self.fields.push(value),
+            DocsMember::Constructor(value) => self.constructors.push(value),
+            DocsMember::Method(value) => self.methods.push(value),
+        }
+    }
+
+    fn into_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": self.kind,
+            "name": self.name,
+            "qualifiedName": self.qualified_name,
+            "package": self.package,
+            "visibility": self.visibility,
+            "modifiers": self.modifiers,
+            "annotations": self.annotations,
+            "description": self.description,
+            "examples": self.examples,
+            "extends": self.extends,
+            "implements": self.implements,
+            "fields": self.fields,
+            "constructors": self.constructors,
+            "methods": self.methods,
+        })
+    }
+}
+
+enum DocsMember {
+    Field(serde_json::Value),
+    Constructor(serde_json::Value),
+    Method(serde_json::Value),
+}
+
+fn parse_java_package(content: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let line = line.trim();
+        line.strip_prefix("package ")
+            .and_then(|rest| rest.strip_suffix(';'))
+            .map(|package| package.trim().to_string())
+    })
+}
+
+fn parse_type_declaration(
+    line: &str,
+    package: &str,
+    annotations: Vec<serde_json::Value>,
+) -> Option<DocsTypeBuilder> {
+    let header = line.split('{').next().unwrap_or(line).trim();
+    let tokens = split_java_words(header);
+    let kind_index = tokens
+        .iter()
+        .position(|token| matches!(token.as_str(), "class" | "interface" | "enum" | "record"))?;
+    let kind = tokens.get(kind_index)?.to_string();
+    let name = tokens
+        .get(kind_index + 1)?
+        .trim_end_matches('(')
+        .to_string();
+    let visibility = parse_visibility(&tokens);
+    let modifiers = parse_modifiers(&tokens[..kind_index]);
+    let qualified_name = qualify_name(package, &name);
+    let extends = tokens
+        .iter()
+        .position(|token| token == "extends")
+        .and_then(|index| tokens.get(index + 1))
+        .map(|name| qualify_type(package, name.trim_end_matches(',')));
+    let implements = tokens
+        .iter()
+        .position(|token| token == "implements")
+        .map(|index| {
+            tokens[index + 1..]
+                .iter()
+                .map(|token| token.trim_end_matches(','))
+                .filter(|token| !token.is_empty())
+                .map(|token| qualify_type(package, token))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Some(DocsTypeBuilder {
+        kind,
+        name,
+        qualified_name,
+        package: package.to_string(),
+        visibility,
+        modifiers,
+        annotations,
+        description: None,
+        examples: Vec::new(),
+        extends,
+        implements,
+        fields: Vec::new(),
+        constructors: Vec::new(),
+        methods: Vec::new(),
+    })
+}
+
+fn parse_member_declaration(
+    line: &str,
+    package: &str,
+    type_name: &str,
+    annotations: Vec<serde_json::Value>,
+) -> Option<DocsMember> {
+    let declaration = line
+        .split('{')
+        .next()
+        .unwrap_or(line)
+        .split('=')
+        .next()
+        .unwrap_or(line)
+        .trim()
+        .trim_end_matches(';')
+        .trim();
+    if declaration.is_empty() || declaration.starts_with("return ") {
+        return None;
+    }
+    if declaration.contains('(') && declaration.contains(')') {
+        parse_method_or_constructor(declaration, package, type_name, annotations)
+    } else {
+        parse_field(declaration, package, type_name, annotations).map(DocsMember::Field)
+    }
+}
+
+fn parse_field(
+    declaration: &str,
+    package: &str,
+    type_name: &str,
+    annotations: Vec<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let (head, name) = split_type_and_name(declaration)?;
+    let type_token = strip_leading_modifiers(&head);
+    let tokens = split_java_words(declaration);
+    let visibility = parse_visibility(&tokens);
+    let modifiers = parse_modifiers(&tokens);
+    Some(serde_json::json!({
+        "name": name,
+        "qualifiedName": format!("{}.{}.{}", package, type_name, name),
+        "visibility": visibility,
+        "modifiers": modifiers,
+        "annotations": annotations,
+        "type": qualify_type(package, &type_token),
+    }))
+}
+
+fn parse_method_or_constructor(
+    declaration: &str,
+    package: &str,
+    type_name: &str,
+    annotations: Vec<serde_json::Value>,
+) -> Option<DocsMember> {
+    let open = declaration.find('(')?;
+    let close = declaration.rfind(')')?;
+    let before = declaration[..open].trim();
+    let params = &declaration[open + 1..close];
+    let after = declaration[close + 1..].trim();
+    let (head, name) = split_type_and_name(before)?;
+    let tokens = split_java_words(before);
+    let visibility = parse_visibility(&tokens);
+    let modifiers = parse_modifiers(&tokens);
+    let parameters = parse_parameters(params, package);
+    let throws = parse_throws(after, package);
+    if name == type_name {
+        return Some(DocsMember::Constructor(serde_json::json!({
+            "name": name,
+            "qualifiedName": format!("{}.{}.{}", package, type_name, name),
+            "visibility": visibility,
+            "modifiers": modifiers,
+            "annotations": annotations,
+            "parameters": parameters,
+            "throws": throws,
+        })));
+    }
+    let return_type = strip_method_type_parameters(&strip_leading_modifiers(&head));
+    Some(DocsMember::Method(serde_json::json!({
+        "name": name,
+        "qualifiedName": format!("{}.{}.{}", package, type_name, name),
+        "visibility": visibility,
+        "modifiers": modifiers,
+        "annotations": annotations,
+        "parameters": parameters,
+        "returnType": qualify_type(package, &return_type),
+        "throws": throws,
+    })))
+}
+
+fn split_type_and_name(input: &str) -> Option<(String, String)> {
+    let split_at = input
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| ch.is_whitespace())?
+        .0;
+    let head = input[..split_at].trim();
+    let name = input[split_at..].trim();
+    if head.is_empty() || name.is_empty() {
+        return None;
+    }
+    Some((head.to_string(), name.to_string()))
+}
+
+fn strip_leading_modifiers(input: &str) -> String {
+    let mut rest = input.trim();
+    while let Some((candidate, tail)) = rest.split_once(char::is_whitespace) {
+        if !is_java_modifier(candidate) {
+            break;
+        }
+        rest = tail.trim_start();
+    }
+    rest.to_string()
+}
+
+fn strip_method_type_parameters(input: &str) -> String {
+    let input = input.trim();
+    if !input.starts_with('<') {
+        return input.to_string();
+    }
+    let mut depth = 0_i32;
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return input[index + ch.len_utf8()..].trim().to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    input.to_string()
+}
+
+fn parse_parameters(params: &str, package: &str) -> Vec<serde_json::Value> {
+    if params.trim().is_empty() {
+        return Vec::new();
+    }
+    split_java_commas(params)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, param)| {
+            let param = param.trim();
+            if param.is_empty() {
+                return None;
+            }
+            let (type_name, name) = split_parameter_type_and_name(param)
+                .unwrap_or_else(|| (param.to_string(), format!("arg{index}")));
+            Some(serde_json::json!({
+                "name": name,
+                "type": qualify_type(package, &type_name),
+            }))
+        })
+        .collect()
+}
+
+fn split_parameter_type_and_name(param: &str) -> Option<(String, String)> {
+    let split_at = param
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| ch.is_whitespace())?
+        .0;
+    let type_name = param[..split_at].trim();
+    let name = param[split_at..].trim();
+    if type_name.is_empty() || name.is_empty() || name.contains('.') {
+        return None;
+    }
+    let type_name = type_name.strip_prefix("final ").unwrap_or(type_name).trim();
+    Some((type_name.to_string(), name.to_string()))
+}
+
+fn parse_throws(after: &str, package: &str) -> Vec<String> {
+    after
+        .strip_prefix("throws ")
+        .map(|throws| {
+            split_java_commas(throws)
+                .into_iter()
+                .map(|name| qualify_type(package, name.trim()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_annotation(line: &str, package: &str) -> serde_json::Value {
+    let body = line.trim().trim_start_matches('@');
+    let name = body.split(['(', ' ', '\t']).next().unwrap_or(body).trim();
+    let qualified_name = if name.contains('.') {
+        name.to_string()
+    } else if is_java_lang_type(name) {
+        format!("java.lang.{name}")
+    } else {
+        qualify_name(package, name)
+    };
+    serde_json::json!({
+        "qualifiedName": qualified_name,
+        "values": {},
+    })
+}
+
+fn extract_docs_types_from_jar(path: &Path) -> Result<Vec<serde_json::Value>> {
+    if let Some(javadocs) = find_javadoc_jar(path) {
+        let types = extract_docs_types_from_javadoc_jar(&javadocs)?;
+        if !types.is_empty() {
+            return Ok(types);
+        }
+    }
+    extract_docs_types_from_bytecode(path)
+}
+
+fn find_javadoc_jar(path: &Path) -> Option<PathBuf> {
+    let stem = path.file_stem()?.to_str()?;
+    let parent = path.parent()?;
+    let candidates = [
+        parent.join(format!("{stem}-javadoc.jar")),
+        parent.join(format!("{stem}-javadocs.jar")),
+    ];
+    candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn extract_docs_types_from_javadoc_jar(path: &Path) -> Result<Vec<serde_json::Value>> {
+    let file = fs::File::open(path)
+        .with_context(|| format!("failed to open javadoc jar {}", path.display()))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .with_context(|| format!("failed to read javadoc jar {}", path.display()))?;
+    let mut types = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        let name = entry.name().to_string();
+        if !is_javadoc_type_page(&name) {
+            continue;
+        }
+        let mut html = String::new();
+        entry.read_to_string(&mut html)?;
+        if let Some(ty) = parse_javadoc_type_page(&name, &html) {
+            types.push(ty);
+        }
+    }
+    types.sort_by_key(|value| {
+        value
+            .get("qualifiedName")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string()
+    });
+    Ok(types)
+}
+
+fn is_javadoc_type_page(name: &str) -> bool {
+    name.ends_with(".html")
+        && !name.contains('-')
+        && !name.ends_with("/package-summary.html")
+        && !name.ends_with("/module-summary.html")
+        && !name.ends_with("/overview-summary.html")
+        && !name.ends_with("/index.html")
+        && name.rsplit('/').next().is_some_and(|file| {
+            file.chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_uppercase())
+        })
+}
+
+fn parse_javadoc_type_page(path: &str, html: &str) -> Option<serde_json::Value> {
+    let qualified_name = path.trim_end_matches(".html").replace('/', ".");
+    let (package, name) = qualified_name
+        .rsplit_once('.')
+        .map(|(package, name)| (package.to_string(), name.to_string()))
+        .unwrap_or_else(|| (String::new(), qualified_name.clone()));
+    let text = normalize_doc_text(&strip_html_tags(html));
+    let kind = if text.contains(&format!("interface {name}")) {
+        "interface"
+    } else if text.contains(&format!("enum {name}")) {
+        "enum"
+    } else if text.contains(&format!("record {name}")) {
+        "record"
+    } else {
+        "class"
+    };
+    let member_docs = extract_javadoc_member_docs(html);
+    let description = extract_javadoc_type_description(html);
+    let examples = extract_javadoc_examples(html);
+    let mut builder = DocsTypeBuilder {
+        kind: kind.to_string(),
+        name: name.clone(),
+        qualified_name: qualified_name.clone(),
+        package: package.clone(),
+        visibility: "public".to_string(),
+        modifiers: vec!["public".to_string()],
+        annotations: Vec::new(),
+        description,
+        examples,
+        extends: None,
+        implements: Vec::new(),
+        fields: Vec::new(),
+        constructors: Vec::new(),
+        methods: Vec::new(),
+    };
+    for member_doc in member_docs {
+        if let Some(mut member) =
+            parse_member_declaration(&member_doc.signature, &package, &name, Vec::new())
+        {
+            enrich_member_with_javadoc(&mut member, &member_doc);
+            builder.push_member(member);
+        }
+    }
+    Some(builder.into_json())
+}
+
+#[derive(Debug, Clone, Default)]
+struct JavadocMemberDoc {
+    signature: String,
+    description: Option<String>,
+    parameter_descriptions: Vec<(String, String)>,
+    return_description: Option<String>,
+}
+
+fn extract_javadoc_member_docs(html: &str) -> Vec<JavadocMemberDoc> {
+    let detail_re =
+        regex::Regex::new(r#"(?s)<section class=\"detail\"[^>]*>(.*?)</section>"#).unwrap();
+    let signature_re =
+        regex::Regex::new(r#"(?s)<div class=\"member-signature\">(.*?)</div>"#).unwrap();
+    let mut members = Vec::new();
+    for detail in detail_re
+        .captures_iter(html)
+        .filter_map(|captures| captures.get(1).map(|value| value.as_str()))
+    {
+        let Some(signature_html) = signature_re
+            .captures(detail)
+            .and_then(|captures| captures.get(1).map(|value| value.as_str()))
+        else {
+            continue;
+        };
+        let signature = normalize_doc_text(&strip_html_tags(signature_html));
+        if signature.is_empty() {
+            continue;
+        }
+        members.push(JavadocMemberDoc {
+            signature,
+            description: extract_javadoc_member_description(detail),
+            parameter_descriptions: extract_javadoc_parameter_descriptions(detail),
+            return_description: extract_javadoc_return_description(detail),
+        });
+    }
+    if members.is_empty() {
+        members.extend(
+            extract_javadoc_signatures(html)
+                .into_iter()
+                .map(|signature| JavadocMemberDoc {
+                    signature,
+                    ..JavadocMemberDoc::default()
+                }),
+        );
+    }
+    members
+}
+
+fn extract_javadoc_member_description(detail_html: &str) -> Option<String> {
+    let re = regex::Regex::new(r#"(?s)<div class=\"block\">(.*?)</div>"#).unwrap();
+    re.captures(detail_html)
+        .and_then(|captures| captures.get(1))
+        .map(|value| html_fragment_to_markdown(value.as_str()))
+        .filter(|value| !value.is_empty())
+}
+
+fn extract_javadoc_parameter_descriptions(detail_html: &str) -> Vec<(String, String)> {
+    let re = regex::Regex::new(r#"(?s)<dd>\s*<code>(.*?)</code>\s*-\s*(.*?)</dd>"#).unwrap();
+    re.captures_iter(detail_html)
+        .filter_map(|captures| {
+            let name = captures
+                .get(1)
+                .map(|value| normalize_doc_text(&strip_html_tags(value.as_str())))?;
+            let description = captures
+                .get(2)
+                .map(|value| html_fragment_to_markdown(value.as_str()))?;
+            if name.is_empty() || description.is_empty() {
+                None
+            } else {
+                Some((name, description))
+            }
+        })
+        .collect()
+}
+
+fn extract_javadoc_return_description(detail_html: &str) -> Option<String> {
+    let re = regex::Regex::new(r#"(?s)<dt>Returns:</dt>\s*<dd>(.*?)</dd>"#).unwrap();
+    re.captures(detail_html)
+        .and_then(|captures| captures.get(1))
+        .map(|value| html_fragment_to_markdown(value.as_str()))
+        .filter(|value| !value.is_empty())
+}
+
+fn enrich_member_with_javadoc(member: &mut DocsMember, doc: &JavadocMemberDoc) {
+    let value = match member {
+        DocsMember::Field(value) | DocsMember::Constructor(value) | DocsMember::Method(value) => {
+            value
+        }
+    };
+    if let Some(description) = &doc.description {
+        value["description"] = serde_json::Value::String(description.clone());
+    }
+    if let Some(return_description) = &doc.return_description {
+        value["returnDescription"] = serde_json::Value::String(return_description.clone());
+    }
+    if let Some(parameters) = value
+        .get_mut("parameters")
+        .and_then(|value| value.as_array_mut())
+    {
+        for parameter in parameters {
+            let Some(parameter_name) = parameter.get("name").and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+            if let Some((_, description)) = doc
+                .parameter_descriptions
+                .iter()
+                .find(|(name, _)| name == parameter_name)
+            {
+                parameter["description"] = serde_json::Value::String(description.clone());
+            }
+        }
+    }
+}
+
+fn extract_javadoc_signatures(html: &str) -> Vec<String> {
+    let mut signatures = Vec::new();
+    let re = regex::Regex::new(r#"(?s)<div class="member-signature">(.*?)</div>"#).unwrap();
+    for captures in re.captures_iter(html) {
+        if let Some(signature) = captures.get(1) {
+            let text = normalize_doc_text(&strip_html_tags(signature.as_str()));
+            if !text.is_empty() {
+                signatures.push(text);
+            }
+        }
+    }
+    if signatures.is_empty() {
+        let pre = regex::Regex::new(r#"(?s)<pre[^>]*>(.*?)</pre>"#).unwrap();
+        for captures in pre.captures_iter(html) {
+            if let Some(signature) = captures.get(1) {
+                let text = normalize_doc_text(&strip_html_tags(signature.as_str()))
+                    .trim_end_matches(';')
+                    .to_string();
+                if is_javadoc_member_signature(&text) {
+                    signatures.push(text);
+                }
+            }
+        }
+    }
+    signatures
+}
+
+fn is_javadoc_member_signature(text: &str) -> bool {
+    let text = strip_leading_annotation_lines(text);
+    let tokens = split_java_words(text);
+    if tokens.is_empty() {
+        return false;
+    }
+    if !matches!(tokens[0].as_str(), "public" | "protected" | "private") {
+        return false;
+    }
+    !tokens
+        .iter()
+        .any(|token| matches!(token.as_str(), "class" | "interface" | "enum" | "record"))
+}
+
+fn is_javadoc_type_signature(text: &str) -> bool {
+    split_java_words(strip_leading_annotation_lines(text))
+        .iter()
+        .any(|token| matches!(token.as_str(), "class" | "interface" | "enum" | "record"))
+}
+
+fn strip_leading_annotation_lines(text: &str) -> &str {
+    let mut rest = text.trim();
+    while rest.starts_with('@') {
+        let Some((_, tail)) = rest.split_once(char::is_whitespace) else {
+            return "";
+        };
+        rest = tail.trim_start();
+    }
+    rest
+}
+
+fn extract_javadoc_examples(html: &str) -> Vec<String> {
+    let pre = regex::Regex::new(r#"(?s)<pre[^>]*>(.*?)</pre>"#).unwrap();
+    let mut examples = Vec::new();
+    for example in pre
+        .captures_iter(html)
+        .filter_map(|captures| captures.get(1))
+        .map(|example| normalize_code_block(&strip_html_tags(example.as_str())))
+    {
+        let normalized = normalize_doc_text(&example);
+        if !example.is_empty()
+            && !is_javadoc_member_signature(&normalized)
+            && !is_javadoc_type_signature(&normalized)
+            && !examples.contains(&example)
+        {
+            examples.push(example);
+        }
+    }
+    examples
+}
+
+fn normalize_code_block(input: &str) -> String {
+    input
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn extract_javadoc_type_description(html: &str) -> Option<String> {
+    let patterns = [
+        r#"(?s)<section[^>]*class="[^"]*(?:class|interface|enum|record)-description[^"]*"[^>]*>.*?<div class="block">(.*?)</div>"#,
+        r#"(?s)<div class="description">.*?<div class="block">(.*?)</div>"#,
+    ];
+    patterns.iter().find_map(|pattern| {
+        let re = regex::Regex::new(pattern).ok()?;
+        let html = re.captures(html)?.get(1)?.as_str();
+        let markdown = html_fragment_to_markdown(html);
+        (!markdown.is_empty()).then_some(markdown)
+    })
+}
+
+fn html_fragment_to_markdown(input: &str) -> String {
+    let fragment = html_unescape(input);
+    let markdown = quick_html2md::html_to_markdown(&format!("<div>{fragment}</div>"));
+    normalize_markdown_text(&markdown)
+}
+
+fn normalize_markdown_text(input: &str) -> String {
+    let mut out = String::new();
+    let mut blank_lines = 0;
+    let mut in_fence = false;
+    for raw_line in input.lines() {
+        let line = raw_line.trim_end();
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(trimmed);
+            out.push('\n');
+            in_fence = !in_fence;
+            blank_lines = 0;
+            continue;
+        }
+        if in_fence {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if trimmed.is_empty() {
+            blank_lines += 1;
+            if blank_lines <= 1 && !out.trim().is_empty() && !out.ends_with("\n\n") {
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push('\n');
+            }
+            continue;
+        }
+        blank_lines = 0;
+        if is_markdown_block_line(trimmed) {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(trimmed);
+            out.push('\n');
+        } else {
+            if !out.is_empty() && !out.ends_with(['\n', ' ']) {
+                out.push(' ');
+            }
+            out.push_str(trimmed);
+        }
+    }
+    out.trim().to_string()
+}
+
+fn is_markdown_block_line(line: &str) -> bool {
+    line.starts_with("#")
+        || line.starts_with(">")
+        || line.starts_with("- ")
+        || line.starts_with("* ")
+        || regex::Regex::new(r#"^\d+\.\s"#).unwrap().is_match(line)
+}
+
+fn strip_html_tags(input: &str) -> String {
+    let tags = regex::Regex::new(r#"(?s)<[^>]+>"#).unwrap();
+    html_unescape(&tags.replace_all(input, " "))
+}
+
+fn html_unescape(input: &str) -> String {
+    input
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+}
+
+fn normalize_doc_text(input: &str) -> String {
+    input.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn extract_docs_types_from_bytecode(path: &Path) -> Result<Vec<serde_json::Value>> {
+    let output = ProcessCommand::new("jar")
+        .arg("tf")
+        .arg(path)
+        .output()
+        .with_context(|| "failed to run jar tf for docs extraction")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "jar tf failed for {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let class_names = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| line.ends_with(".class") && !line.contains('$'))
+        .map(|line| line.trim_end_matches(".class").replace('/', "."))
+        .collect::<Vec<_>>();
+    let mut types = Vec::new();
+    for class_name in class_names {
+        let output = ProcessCommand::new("javap")
+            .arg("-classpath")
+            .arg(path)
+            .arg("-protected")
+            .arg("-v")
+            .arg(&class_name)
+            .output()
+            .with_context(|| format!("failed to run javap for {class_name}"))?;
+        if output.status.success() {
+            if let Some(ty) = parse_javap_type(&String::from_utf8_lossy(&output.stdout)) {
+                types.push(ty);
+            }
+        }
+    }
+    Ok(types)
+}
+
+fn parse_javap_type(output: &str) -> Option<serde_json::Value> {
+    let signature_lines = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            line.ends_with(';')
+                || line.ends_with('{')
+                || line.starts_with("public class ")
+                || line.starts_with("protected class ")
+                || line.starts_with("class ")
+                || line.starts_with("public interface ")
+                || line.starts_with("public enum ")
+        })
+        .filter(|line| {
+            !line.starts_with("descriptor:")
+                && !line.starts_with("flags:")
+                && !line.starts_with('#')
+                && !line.starts_with("Classfile ")
+                && !line.starts_with("Last modified ")
+                && !line.starts_with("SHA-256 ")
+                && !line.starts_with("Compiled from ")
+        })
+        .collect::<Vec<_>>();
+    let type_line = signature_lines.iter().find(|line| {
+        line.contains(" class ") || line.contains(" interface ") || line.contains(" enum ")
+    })?;
+    let header = type_line.trim_end_matches('{').trim();
+    let tokens = split_java_words(header);
+    let kind_index = tokens
+        .iter()
+        .position(|token| matches!(token.as_str(), "class" | "interface" | "enum"))?;
+    let kind = tokens[kind_index].clone();
+    let qualified_name = tokens.get(kind_index + 1)?.to_string();
+    let package = qualified_name
+        .rsplit_once('.')
+        .map(|(package, _)| package.to_string())
+        .unwrap_or_default();
+    let name = qualified_name
+        .rsplit_once('.')
+        .map(|(_, name)| name.to_string())
+        .unwrap_or_else(|| qualified_name.clone());
+    let mut builder = DocsTypeBuilder {
+        kind,
+        name: name.clone(),
+        qualified_name: qualified_name.clone(),
+        package: package.clone(),
+        visibility: parse_visibility(&tokens),
+        modifiers: parse_modifiers(&tokens[..kind_index]),
+        annotations: Vec::new(),
+        description: None,
+        examples: Vec::new(),
+        extends: None,
+        implements: Vec::new(),
+        fields: Vec::new(),
+        constructors: Vec::new(),
+        methods: Vec::new(),
+    };
+    let parameter_names = javap_parameter_names(output);
+    for line in signature_lines {
+        let line = line.trim_end_matches(';').trim();
+        if line == header || line.ends_with('{') {
+            continue;
+        }
+        if line.contains('(') && line.contains(')') {
+            if let Some(mut member) = parse_method_or_constructor(line, &package, &name, Vec::new())
+            {
+                if let DocsMember::Method(value) | DocsMember::Constructor(value) = &mut member {
+                    if let Some(names) = value
+                        .get("name")
+                        .and_then(|value| value.as_str())
+                        .and_then(|method_name| parameter_names.get(method_name))
+                    {
+                        apply_parameter_names(value, names);
+                    }
+                }
+                builder.push_member(member);
+            }
+        } else if let Some(field) = parse_field(line, &package, &name, Vec::new()) {
+            builder.fields.push(field);
+        }
+    }
+    Some(builder.into_json())
+}
+
+fn javap_parameter_names(output: &str) -> std::collections::HashMap<String, Vec<String>> {
+    let lines = output.lines().collect::<Vec<_>>();
+    let mut names_by_method = std::collections::HashMap::new();
+    let mut current_method: Option<String> = None;
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index].trim();
+        if line.ends_with(';')
+            && line.contains('(')
+            && !line.starts_with("descriptor:")
+            && !line.starts_with('#')
+        {
+            current_method = line
+                .split('(')
+                .next()
+                .and_then(|before| split_java_words(before).last().cloned());
+        } else if line == "MethodParameters:" {
+            if let Some(method) = current_method.clone() {
+                let mut names = Vec::new();
+                index += 2;
+                while index < lines.len() {
+                    let candidate = lines[index].trim();
+                    if candidate.is_empty() || candidate.ends_with(':') || candidate.contains(';') {
+                        break;
+                    }
+                    if let Some(name) = candidate.split_whitespace().next() {
+                        names.push(name.to_string());
+                    }
+                    index += 1;
+                }
+                names_by_method.insert(method, names);
+            }
+        }
+        index += 1;
+    }
+    names_by_method
+}
+
+fn apply_parameter_names(value: &mut serde_json::Value, names: &[String]) {
+    if let Some(params) = value
+        .get_mut("parameters")
+        .and_then(|value| value.as_array_mut())
+    {
+        for (param, name) in params.iter_mut().zip(names) {
+            param["name"] = serde_json::Value::String(name.clone());
+        }
+    }
+}
+
+fn split_java_words(input: &str) -> Vec<String> {
+    input
+        .split_whitespace()
+        .map(|token| token.trim_matches(',').to_string())
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+fn split_java_commas(input: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut angle_depth = 0_i32;
+    let mut paren_depth = 0_i32;
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            ',' if angle_depth == 0 && paren_depth == 0 => {
+                parts.push(input[start..index].trim());
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(input[start..].trim());
+    parts.into_iter().filter(|part| !part.is_empty()).collect()
+}
+
+fn parse_visibility(tokens: &[String]) -> String {
+    if tokens.iter().any(|token| token == "public") {
+        "public".to_string()
+    } else if tokens.iter().any(|token| token == "protected") {
+        "protected".to_string()
+    } else if tokens.iter().any(|token| token == "private") {
+        "private".to_string()
+    } else {
+        "package".to_string()
+    }
+}
+
+fn parse_modifiers(tokens: &[String]) -> Vec<String> {
+    tokens
+        .iter()
+        .filter(|token| is_java_modifier(token))
+        .cloned()
+        .collect()
+}
+
+fn is_java_modifier(token: &str) -> bool {
+    matches!(
+        token,
+        "public"
+            | "protected"
+            | "private"
+            | "static"
+            | "final"
+            | "abstract"
+            | "default"
+            | "sealed"
+            | "non-sealed"
+            | "synchronized"
+            | "native"
+            | "strictfp"
+    )
+}
+
+fn qualify_name(package: &str, name: &str) -> String {
+    if package.is_empty() || name.contains('.') {
+        name.to_string()
+    } else {
+        format!("{package}.{name}")
+    }
+}
+
+fn qualify_type(package: &str, name: &str) -> String {
+    let name = normalize_java_type_spacing(name.trim().trim_end_matches(','));
+    if let Some(simple) = name.strip_prefix("java.lang.") {
+        return simple.to_string();
+    }
+    let base = name
+        .trim_end_matches("...")
+        .split(['<', '['])
+        .next()
+        .unwrap_or(&name)
+        .trim();
+    if name.is_empty()
+        || name == "void"
+        || is_type_variable(&name)
+        || is_primitive_type(base)
+        || is_java_lang_type(base)
+        || is_common_jdk_simple_type(base)
+        || is_unqualified_exception_or_error(base)
+        || name.contains('.')
+        || name.contains('<')
+    {
+        name.to_string()
+    } else {
+        qualify_name(package, &name)
+    }
+}
+
+fn normalize_java_type_spacing(input: &str) -> String {
+    let mut out = String::new();
+    let mut previous_was_space = false;
+    for ch in input.chars() {
+        match ch {
+            '<' | '>' | '[' | ']' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(ch);
+                previous_was_space = false;
+            }
+            ',' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(ch);
+                out.push(' ');
+                previous_was_space = true;
+            }
+            ch if ch.is_whitespace() => {
+                if !out.is_empty()
+                    && !previous_was_space
+                    && !out.ends_with('<')
+                    && !out.ends_with('[')
+                {
+                    out.push(' ');
+                    previous_was_space = true;
+                }
+            }
+            _ => {
+                out.push(ch);
+                previous_was_space = false;
+            }
+        }
+    }
+    out.trim().to_string()
+}
+
+fn is_type_variable(name: &str) -> bool {
+    let name = name.trim();
+    name.len() == 1 && name.chars().all(|ch| ch.is_ascii_uppercase())
+}
+
+fn is_unqualified_exception_or_error(name: &str) -> bool {
+    !name.contains('.') && (name.ends_with("Exception") || name.ends_with("Error"))
+}
+
+fn is_common_jdk_simple_type(name: &str) -> bool {
+    matches!(
+        name,
+        "File"
+            | "InputStream"
+            | "OutputStream"
+            | "Reader"
+            | "Writer"
+            | "DataInput"
+            | "DataOutput"
+            | "IOException"
+            | "URL"
+            | "URI"
+            | "List"
+            | "Set"
+            | "Map"
+            | "Collection"
+            | "Iterable"
+            | "Iterator"
+            | "ConcurrentHashMap"
+    )
+}
+
+fn is_primitive_type(name: &str) -> bool {
+    matches!(
+        name,
+        "boolean" | "byte" | "char" | "short" | "int" | "long" | "float" | "double"
+    )
+}
+
+fn is_java_lang_type(name: &str) -> bool {
+    matches!(
+        name,
+        "String"
+            | "Object"
+            | "Class"
+            | "Integer"
+            | "Long"
+            | "Boolean"
+            | "Double"
+            | "Float"
+            | "Short"
+            | "Byte"
+            | "Character"
+            | "ClassLoader"
+            | "Throwable"
+            | "Exception"
+            | "RuntimeException"
+            | "IllegalArgumentException"
+            | "Deprecated"
+            | "Override"
+            | "SuppressWarnings"
+            | "FunctionalInterface"
+    )
+}
+
+fn count_char(input: &str, needle: char) -> i32 {
+    input.chars().filter(|ch| *ch == needle).count() as i32
+}
+
+fn filter_docs_types(types: Vec<serde_json::Value>, filters: &[String]) -> Vec<serde_json::Value> {
+    if filters.is_empty() {
+        return types;
+    }
+    types
+        .into_iter()
+        .filter(|ty| docs_type_matches_filters(ty, filters))
+        .collect()
+}
+
+fn docs_type_matches_filters(ty: &serde_json::Value, filters: &[String]) -> bool {
+    let name = ty
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let qualified_name = ty
+        .get("qualifiedName")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    filters.iter().any(|filter| {
+        let filter = filter.trim();
+        filter == name
+            || filter == qualified_name
+            || qualified_name.ends_with(&format!(".{filter}"))
+            || simple_glob_match(filter, name)
+            || simple_glob_match(filter, qualified_name)
+    })
+}
+
+fn filter_remote_docs_text(text: String, json: bool, type_filters: &[String]) -> Result<String> {
+    if !json || type_filters.is_empty() {
+        return Ok(text);
+    }
+    let mut value: serde_json::Value = serde_json::from_str(&text)?;
+    if let Some(types) = value
+        .get_mut("types")
+        .and_then(|value| value.as_array_mut())
+    {
+        let filtered = filter_docs_types(std::mem::take(types), type_filters);
+        *types = filtered;
+    }
+    Ok(format!("{}\n", serde_json::to_string_pretty(&value)?))
+}
+
+fn simple_glob_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    match (pattern.strip_prefix('*'), pattern.strip_suffix('*')) {
+        (Some(suffix), _) => value.ends_with(suffix),
+        (_, Some(prefix)) => value.starts_with(prefix),
+        _ => false,
+    }
+}
+
+fn fetch_remote_docs(cmd: &DocsCommand) -> Result<String> {
+    let repos = docs_repositories(&cmd.repos);
+    let coordinate = parse_docs_coordinate(&cmd.target, &repos)?;
+    let extension = if cmd.json { "json" } else { "md" };
+    let filename = format!(
+        "{}-{}-jbx-docs.{extension}",
+        coordinate.id, coordinate.version
+    );
+    let cache_root = cmd
+        .cache_dir
+        .clone()
+        .unwrap_or(default_cache_dir()?)
+        .join("docs");
+    let cache_path = cache_root
+        .join(coordinate.group.replace('.', "/"))
+        .join(&coordinate.id)
+        .join(&coordinate.version)
+        .join(&filename);
+    if cache_path.exists() {
+        let text = fs::read_to_string(&cache_path)
+            .with_context(|| format!("failed to read cached docs {}", cache_path.display()))?;
+        return filter_remote_docs_text(text, cmd.json, &cmd.types);
+    }
+    for repo in repos {
+        let url = docs_artifact_url(&repo, &coordinate, &filename);
+        match ureq::get(&url).call() {
+            Ok(response) => {
+                let text = response
+                    .into_string()
+                    .with_context(|| format!("failed to read docs sidecar from {url}"))?;
+                if let Some(parent) = cache_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&cache_path, &text)?;
+                return filter_remote_docs_text(text, cmd.json, &cmd.types);
+            }
+            Err(ureq::Error::Status(404, _)) => continue,
+            Err(_) => continue,
+        }
+    }
+    fetch_remote_javadoc_docs(cmd, &coordinate, &cache_root)
+}
+
+fn fetch_remote_javadoc_docs(
+    cmd: &DocsCommand,
+    coordinate: &DocsCoordinate,
+    cache_root: &Path,
+) -> Result<String> {
+    let filename = format!("{}-{}-javadoc.jar", coordinate.id, coordinate.version);
+    let cache_path = cache_root
+        .join(coordinate.group.replace('.', "/"))
+        .join(&coordinate.id)
+        .join(&coordinate.version)
+        .join(&filename);
+    if !cache_path.exists() {
+        let mut found = false;
+        for repo in docs_repositories(&cmd.repos) {
+            let url = docs_artifact_url(&repo, coordinate, &filename);
+            match ureq::get(&url).call() {
+                Ok(response) => {
+                    let mut bytes = Vec::new();
+                    response
+                        .into_reader()
+                        .read_to_end(&mut bytes)
+                        .with_context(|| format!("failed to read javadoc jar from {url}"))?;
+                    if let Some(parent) = cache_path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(&cache_path, bytes)?;
+                    found = true;
+                    break;
+                }
+                Err(ureq::Error::Status(404, _)) => continue,
+                Err(_) => continue,
+            }
+        }
+        if !found {
+            anyhow::bail!(
+                "jbx docs sidecar or javadoc jar not found for {}:{}:{}",
+                coordinate.group,
+                coordinate.id,
+                coordinate.version
+            );
+        }
+    }
+    let types = filter_docs_types(
+        extract_docs_types_from_javadoc_jar(&cache_path)?,
+        &cmd.types,
+    );
+    if cmd.json {
+        Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+                "artifact": {
+                    "group": coordinate.group,
+                    "id": coordinate.id,
+                    "version": coordinate.version,
+                    "coordinate": format!("{}:{}:{}", coordinate.group, coordinate.id, coordinate.version),
+                },
+                "types": types,
+                "generatedFrom": {
+                    "source": "javadoc",
+                    "jbxVersion": env!("CARGO_PKG_VERSION"),
+                }
+            }))?
+        ))
+    } else {
+        render_docs_markdown(&coordinate.id, Some(coordinate), &[], &types)
+    }
+}
+
+fn docs_repositories(repo_args: &[String]) -> Vec<jbx::resolver::Repository> {
+    let mut repos = maven_tool::maven_repositories(repo_args);
+    repos.sort_by_key(|repo| if repo.id == "central" { 1 } else { 0 });
+    repos
+}
+
+fn docs_artifact_url(
+    repo: &jbx::resolver::Repository,
+    coordinate: &DocsCoordinate,
+    filename: &str,
+) -> String {
+    format!(
+        "{}/{}/{}/{}/{}",
+        repo.url.trim_end_matches('/'),
+        coordinate.group.replace('.', "/"),
+        coordinate.id,
+        coordinate.version,
+        filename
+    )
+}
+
+fn publish_docs_outputs(
+    descriptor: &PublishDescriptor,
+    staged: &StagedPublishSources,
+) -> Result<(String, String)> {
+    let coordinate = DocsCoordinate {
+        group: descriptor.coordinates.group.clone(),
+        id: descriptor.coordinates.id.clone(),
+        version: descriptor.coordinates.version.clone(),
+    };
+    let sources = staged
+        .all_sources
+        .iter()
+        .map(|source| docs_source_json(source, Some(&coordinate)))
+        .collect::<Result<Vec<_>>>()?;
+    let title = descriptor
+        .name
+        .as_deref()
+        .unwrap_or(&descriptor.coordinates.id);
+    let types = extract_docs_types_from_sources(&staged.all_sources)?;
+    let markdown = render_docs_markdown(title, Some(&coordinate), &sources, &types)?;
+    let json = serde_json::to_string_pretty(&serde_json::json!({
+        "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+        "artifact": {
+            "group": coordinate.group,
+            "id": coordinate.id,
+            "version": coordinate.version,
+            "coordinate": format!("{}:{}:{}", coordinate.group, coordinate.id, coordinate.version),
+        },
+        "summary": descriptor.description,
+        "sources": sources,
+        "types": types,
+        "generatedFrom": {
+            "source": "jbx publish",
+            "jbxVersion": env!("CARGO_PKG_VERSION"),
+        }
+    }))?;
+    Ok((markdown, format!("{json}\n")))
 }
 
 fn print_cache_path(cache_dir: Option<PathBuf>) -> Result<()> {
@@ -3188,7 +5032,19 @@ fn prepare_publish_repository(
     )?;
     let pom = artifact_dir.join(format!("{prefix}.pom"));
     fs::write(&pom, render_pom(descriptor)?)?;
-    for file in [&jar, &sources_jar, &javadoc_jar, &pom] {
+    let (docs_markdown, docs_json) = publish_docs_outputs(descriptor, &staged)?;
+    let docs_md = artifact_dir.join(format!("{prefix}-jbx-docs.md"));
+    fs::write(&docs_md, docs_markdown)?;
+    let docs_json_path = artifact_dir.join(format!("{prefix}-jbx-docs.json"));
+    fs::write(&docs_json_path, docs_json)?;
+    for file in [
+        &jar,
+        &sources_jar,
+        &javadoc_jar,
+        &pom,
+        &docs_md,
+        &docs_json_path,
+    ] {
         write_checksums(file)?;
         if !cmd.skip_signing {
             write_gpg_signature(file, cmd.gpg_key.as_deref())?;
@@ -4739,6 +6595,7 @@ fn main() -> Result<()> {
         }
         Some(Commands::Publish(cmd)) => run_publish(cmd)?,
         Some(Commands::Install(cmd)) => run_install(cmd)?,
+        Some(Commands::Docs(cmd)) => run_docs(cmd)?,
         Some(Commands::Check(cmd)) => run_check(cmd)?,
         Some(Commands::Test(cmd)) => run_tests(cmd)?,
         Some(Commands::Fmt(cmd)) => run_fmt(cmd)?,
@@ -4815,6 +6672,133 @@ mod test_command_unit_tests {
             Some("[1] display name with spaces")
         );
         assert_eq!(xml_attr(attrs, "classname").as_deref(), Some("ExampleTest"));
+    }
+
+    #[test]
+    fn javadoc_type_description_is_extracted_and_rendered() {
+        let html = r#"
+            <div class="description">
+              <pre>public class <span class="typeNameLabel">Example</span></pre>
+              <div class="block"><p>Example reads and writes JSON.
+                It supports <code>tree</code> values.</p></div>
+            </div>
+            <div class="member-signature">public void run()</div>
+        "#;
+        let ty = parse_javadoc_type_page("com/example/Example.html", html).unwrap();
+        assert_eq!(
+            ty["description"],
+            "Example reads and writes JSON. It supports `tree` values."
+        );
+
+        let markdown = render_docs_markdown("example", None, &[], &[ty]).unwrap();
+        assert!(
+            markdown.contains("Example reads and writes JSON. It supports `tree` values."),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn javadoc_full_signatures_parse_fields_constructors_methods_and_parameters() {
+        let html = r#"
+            <div class="description">
+              <pre>public class <span class="typeNameLabel">Example</span></pre>
+              <div class="block">Useful example.
+                <pre>Example example = new Example("demo", Map.of());
+String value = example.readValue("{}", String.class);</pre>
+              </div>
+            </div>
+            <ul class="blockList">
+              <li class="blockList">
+                <h4>COUNT</h4>
+                <pre>public static final&nbsp;int&nbsp;COUNT</pre>
+              </li>
+              <li class="blockList">
+                <h4>Example</h4>
+                <pre>public&nbsp;Example( String &nbsp;name,
+       java.util.Map&lt;String, Object&gt;&nbsp;options)
+        throws IOException</pre>
+              </li>
+              <li class="blockList">
+                <h4>readValue</h4>
+                <pre>public final&nbsp;&lt;T&gt;&nbsp;T&nbsp;readValue( String &nbsp;content,
+       Class &lt;T&gt;&nbsp;valueType,
+       String...&nbsp;features)
+        throws IOException,
+               IllegalArgumentException</pre>
+              </li>
+            </ul>
+        "#;
+        let ty = parse_javadoc_type_page("com/example/Example.html", html).unwrap();
+
+        assert_eq!(ty["fields"][0]["name"], "COUNT");
+        assert_eq!(ty["fields"][0]["type"], "int");
+        assert!(ty["description"].as_str().unwrap().contains("```"));
+        assert!(ty["description"]
+            .as_str()
+            .unwrap()
+            .contains("example.readValue"));
+        assert_eq!(ty["examples"].as_array().unwrap().len(), 1);
+        assert!(ty["examples"][0]
+            .as_str()
+            .unwrap()
+            .contains("example.readValue"));
+
+        assert_eq!(ty["constructors"][0]["name"], "Example");
+        assert_eq!(ty["constructors"][0]["parameters"][0]["name"], "name");
+        assert_eq!(ty["constructors"][0]["parameters"][0]["type"], "String");
+        assert_eq!(ty["constructors"][0]["parameters"][1]["name"], "options");
+        assert_eq!(
+            ty["constructors"][0]["parameters"][1]["type"],
+            "java.util.Map<String, Object>"
+        );
+        assert_eq!(ty["constructors"][0]["throws"][0], "IOException");
+
+        assert_eq!(ty["methods"][0]["name"], "readValue");
+        assert_eq!(ty["methods"][0]["modifiers"][0], "public");
+        assert_eq!(ty["methods"][0]["modifiers"][1], "final");
+        assert_eq!(ty["methods"][0]["returnType"], "T");
+        assert_eq!(ty["methods"][0]["parameters"][0]["name"], "content");
+        assert_eq!(ty["methods"][0]["parameters"][1]["name"], "valueType");
+        assert_eq!(ty["methods"][0]["parameters"][1]["type"], "Class<T>");
+        assert_eq!(ty["methods"][0]["parameters"][2]["name"], "features");
+        assert_eq!(ty["methods"][0]["parameters"][2]["type"], "String...");
+        assert_eq!(ty["methods"][0]["throws"][1], "IllegalArgumentException");
+    }
+
+    #[test]
+    fn markdown_renders_type_members_for_agent_context() {
+        let ty = serde_json::json!({
+            "kind": "class",
+            "name": "Example",
+            "qualifiedName": "com.example.Example",
+            "description": "Useful example.",
+            "examples": ["Example example = new Example(\"demo\");\nString value = example.readValue(\"{}\");"],
+            "fields": [{"name": "COUNT", "type": "int", "modifiers": ["public", "static", "final"]}],
+            "constructors": [{"name": "Example", "parameters": [{"name": "name", "type": "String"}], "throws": ["IOException"]}],
+            "methods": [{"name": "readValue", "returnType": "T", "parameters": [{"name": "content", "type": "String"}], "throws": ["IOException"]}]
+        });
+        let markdown = render_docs_markdown("example", None, &[], &[ty]).unwrap();
+
+        assert!(markdown.contains("### Examples"), "{markdown}");
+        assert!(
+            markdown.contains("String value = example.readValue"),
+            "{markdown}"
+        );
+        assert!(markdown.contains("### Fields"), "{markdown}");
+        assert!(
+            markdown.contains("- `public static final int COUNT`"),
+            "{markdown}"
+        );
+        assert!(markdown.contains("### Constructors"), "{markdown}");
+        assert!(
+            markdown.contains("- `Example(String name) throws IOException`"),
+            "{markdown}"
+        );
+        assert!(markdown.contains("### Methods"), "{markdown}");
+        assert!(
+            markdown.contains("- `T readValue(String content) throws IOException`"),
+            "{markdown}"
+        );
     }
 
     #[test]
