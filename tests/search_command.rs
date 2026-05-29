@@ -40,12 +40,13 @@ fn serve_search_response(
 }
 
 #[test]
-fn search_prints_human_readable_maven_central_results() {
+fn search_prints_aligned_table_sorted_by_popularity() {
     let (base, requests, handle) = serve_search_response(
         r#"{
   "response": {
-    "numFound": 1,
+    "numFound": 2,
     "docs": [
+      {"id":"com.example:tiny","g":"com.example","a":"tiny","latestVersion":"1.0.0","p":"jar","versionCount": 1},
       {"id":"com.google.inject:guice","g":"com.google.inject","a":"guice","latestVersion":"7.0.0","p":"jar","versionCount": 24}
     ]
   }
@@ -62,15 +63,19 @@ fn search_prints_human_readable_maven_central_results() {
         .expect("failed to run jbx search");
 
     assert_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines = stdout.lines().collect::<Vec<_>>();
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
-        "com.google.inject:guice\t7.0.0\tjar\t24 versions"
+        lines[0],
+        "ARTIFACT                 VERSION  PACKAGING  VERSIONS"
     );
+    assert_eq!(lines[1], "com.google.inject:guice  7.0.0    jar        24");
+    assert_eq!(lines[2], "com.example:tiny         1.0.0    jar        1");
     let request = requests.recv().unwrap();
     handle.join().unwrap();
     assert!(request.starts_with("GET /solrsearch/select?"), "{request}");
     assert!(request.contains("q=guice"), "{request}");
-    assert!(request.contains("rows=5"), "{request}");
+    assert!(request.contains("rows=100"), "{request}");
     assert!(request.contains("wt=json"), "{request}");
 }
 
@@ -116,6 +121,47 @@ fn search_json_outputs_agent_friendly_payload_and_coordinate_query() {
     assert!(
         request.contains("q=g%3Acom.google.inject%20AND%20a%3Aguice%20AND%20v%3A7.0.0")
             || request.contains("q=g%3Acom.google.inject+AND+a%3Aguice+AND+v%3A7.0.0"),
+        "{request}"
+    );
+}
+
+#[test]
+fn search_accepts_solr_group_and_id_parameters() {
+    let (base, requests, handle) = serve_search_response(
+        r#"{
+  "response": {
+    "numFound": 1,
+    "docs": [
+      {"id":"io.micronaut:micronaut-core","g":"io.micronaut","a":"micronaut-core","latestVersion":"4.9.0","p":"jar","versionCount": 170}
+    ]
+  }
+}"#,
+    );
+
+    let output = jbx_command()
+        .arg("search")
+        .arg("--group")
+        .arg("io.micronaut")
+        .arg("--id")
+        .arg("micronaut-core")
+        .arg("--json")
+        .env("JBX_MAVEN_SEARCH_URL", base)
+        .output()
+        .expect("failed to run jbx search with solr fields");
+
+    assert_success(&output);
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["query"], "g:io.micronaut AND a:micronaut-core");
+    assert_eq!(
+        payload["artifacts"][0]["artifact"],
+        "io.micronaut:micronaut-core"
+    );
+
+    let request = requests.recv().unwrap();
+    handle.join().unwrap();
+    assert!(
+        request.contains("q=g%3Aio.micronaut%20AND%20a%3Amicronaut-core")
+            || request.contains("q=g%3Aio.micronaut+AND+a%3Amicronaut-core"),
         "{request}"
     );
 }

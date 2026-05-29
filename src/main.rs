@@ -1019,8 +1019,19 @@ struct FetchCommand {
 #[derive(Parser, Debug)]
 struct SearchCommand {
     /// Search text, Solr query, or Maven coordinate (group:artifact[:version]).
-    #[arg(required = true)]
     query: Vec<String>,
+
+    /// Solr groupId filter (maps to g:<group>).
+    #[arg(long = "group")]
+    group: Option<String>,
+
+    /// Solr artifactId filter (maps to a:<id>).
+    #[arg(long = "id", alias = "artifact", alias = "artifact-id")]
+    id: Option<String>,
+
+    /// Solr version filter (maps to v:<version> and searches the gav core).
+    #[arg(long = "version")]
+    version: Option<String>,
 
     /// Maximum number of results to return.
     #[arg(long = "limit", short = 'n', default_value_t = 20)]
@@ -1575,9 +1586,9 @@ fn print_catalogs(json: bool) -> Result<()> {
 }
 
 fn run_search(cmd: SearchCommand) -> Result<i32> {
-    let (query, use_gav_core) = maven_search_query(&cmd.query);
+    let (query, use_gav_core) = maven_search_query(&cmd)?;
     let endpoint = maven_search_endpoint();
-    let rows = cmd.limit.to_string();
+    let rows = maven_search_fetch_rows(cmd.limit).to_string();
     let mut request = ureq::get(&endpoint)
         .query("q", &query)
         .query("rows", &rows)
@@ -1602,7 +1613,9 @@ fn run_search(cmd: SearchCommand) -> Result<i32> {
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    let artifacts = docs.iter().map(search_doc_json).collect::<Vec<_>>();
+    let mut artifacts = docs.iter().map(search_doc_json).collect::<Vec<_>>();
+    sort_search_artifacts_by_popularity(&mut artifacts);
+    artifacts.truncate(cmd.limit);
     if cmd.json {
         let payload = serde_json::json!({
             "query": query,
@@ -1611,27 +1624,7 @@ fn run_search(cmd: SearchCommand) -> Result<i32> {
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
-        for artifact in artifacts {
-            println!(
-                "{}\t{}\t{}\t{} versions",
-                artifact
-                    .get("artifact")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or(""),
-                artifact
-                    .get("version")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or(""),
-                artifact
-                    .get("packaging")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or(""),
-                artifact
-                    .get("versionCount")
-                    .and_then(|value| value.as_u64())
-                    .unwrap_or(1),
-            );
-        }
+        print_search_table(&artifacts);
     }
     Ok(0)
 }
@@ -1646,8 +1639,44 @@ fn maven_search_endpoint() -> String {
     }
 }
 
-fn maven_search_query(parts: &[String]) -> (String, bool) {
-    let raw = parts.join(" ");
+fn maven_search_fetch_rows(limit: usize) -> usize {
+    limit.max(100)
+}
+
+fn maven_search_query(cmd: &SearchCommand) -> Result<(String, bool)> {
+    let raw = cmd.query.join(" ");
+    let has_filters = cmd.group.is_some() || cmd.id.is_some() || cmd.version.is_some();
+    if has_filters {
+        let mut clauses = Vec::new();
+        if !raw.trim().is_empty() {
+            clauses.push(raw.trim().to_string());
+        }
+        if let Some(group) = cmd
+            .group
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            clauses.push(format!("g:{}", group.trim()));
+        }
+        if let Some(id) = cmd.id.as_deref().filter(|value| !value.trim().is_empty()) {
+            clauses.push(format!("a:{}", id.trim()));
+        }
+        if let Some(version) = cmd
+            .version
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            clauses.push(format!("v:{}", version.trim()));
+        }
+        if clauses.is_empty() {
+            anyhow::bail!("search requires a query or at least one filter");
+        }
+        return Ok((clauses.join(" AND "), cmd.version.is_some()));
+    }
+
+    if raw.trim().is_empty() {
+        anyhow::bail!("search requires a query or at least one filter");
+    }
     let coord_parts = raw.split(':').collect::<Vec<_>>();
     if (coord_parts.len() == 2 || coord_parts.len() == 3)
         && coord_parts.iter().all(|part| !part.trim().is_empty())
@@ -1656,9 +1685,107 @@ fn maven_search_query(parts: &[String]) -> (String, bool) {
         if coord_parts.len() == 3 {
             query.push_str(&format!(" AND v:{}", coord_parts[2]));
         }
-        return (query, coord_parts.len() == 3);
+        return Ok((query, coord_parts.len() == 3));
     }
-    (raw, false)
+    Ok((raw, false))
+}
+
+fn sort_search_artifacts_by_popularity(artifacts: &mut [serde_json::Value]) {
+    artifacts.sort_by(|left, right| {
+        let left_versions = left
+            .get("versionCount")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(1);
+        let right_versions = right
+            .get("versionCount")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(1);
+        right_versions
+            .cmp(&left_versions)
+            .then_with(|| {
+                let left_timestamp = left
+                    .get("timestamp")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0);
+                let right_timestamp = right
+                    .get("timestamp")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0);
+                right_timestamp.cmp(&left_timestamp)
+            })
+            .then_with(|| search_artifact_name(left).cmp(&search_artifact_name(right)))
+    });
+}
+
+fn print_search_table(artifacts: &[serde_json::Value]) {
+    if artifacts.is_empty() {
+        return;
+    }
+    let headers = ["ARTIFACT", "VERSION", "PACKAGING", "VERSIONS"];
+    let rows = artifacts
+        .iter()
+        .map(|artifact| {
+            [
+                search_artifact_name(artifact),
+                search_artifact_field(artifact, "version"),
+                search_artifact_field(artifact, "packaging"),
+                artifact
+                    .get("versionCount")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1)
+                    .to_string(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let mut widths = [
+        headers[0].len(),
+        headers[1].len(),
+        headers[2].len(),
+        headers[3].len(),
+    ];
+    for row in &rows {
+        for (idx, value) in row.iter().enumerate() {
+            widths[idx] = widths[idx].max(value.len());
+        }
+    }
+    println!(
+        "{:<w0$}  {:<w1$}  {:<w2$}  {}",
+        headers[0],
+        headers[1],
+        headers[2],
+        headers[3],
+        w0 = widths[0],
+        w1 = widths[1],
+        w2 = widths[2]
+    );
+    for row in rows {
+        println!(
+            "{:<w0$}  {:<w1$}  {:<w2$}  {}",
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            w0 = widths[0],
+            w1 = widths[1],
+            w2 = widths[2]
+        );
+    }
+}
+
+fn search_artifact_name(artifact: &serde_json::Value) -> String {
+    artifact
+        .get("artifact")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn search_artifact_field(artifact: &serde_json::Value, field: &str) -> String {
+    artifact
+        .get(field)
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn search_doc_json(doc: &serde_json::Value) -> serde_json::Value {
