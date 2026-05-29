@@ -84,6 +84,8 @@ enum Commands {
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
     Fetch(FetchCommand),
+    /// Search Maven Central for artifacts.
+    Search(SearchCommand),
     /// Run JUnit tests with the standalone console launcher.
     Test(TestCommand),
     /// Format Java source files with Palantir Java Format.
@@ -1015,6 +1017,21 @@ struct FetchCommand {
 }
 
 #[derive(Parser, Debug)]
+struct SearchCommand {
+    /// Search text, Solr query, or Maven coordinate (group:artifact[:version]).
+    #[arg(required = true)]
+    query: Vec<String>,
+
+    /// Maximum number of results to return.
+    #[arg(long = "limit", short = 'n', default_value_t = 20)]
+    limit: usize,
+
+    /// Return structured JSON for agent/tool consumption.
+    #[arg(long = "json")]
+    json: bool,
+}
+
+#[derive(Parser, Debug)]
 struct CacheClearCommand {
     /// Override cache directory.
     #[arg(long = "cache-dir")]
@@ -1555,6 +1572,125 @@ fn print_catalogs(json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn run_search(cmd: SearchCommand) -> Result<i32> {
+    let (query, use_gav_core) = maven_search_query(&cmd.query);
+    let endpoint = maven_search_endpoint();
+    let rows = cmd.limit.to_string();
+    let mut request = ureq::get(&endpoint)
+        .query("q", &query)
+        .query("rows", &rows)
+        .query("wt", "json")
+        .set("User-Agent", "jbx");
+    if use_gav_core {
+        request = request.query("core", "gav");
+    }
+    let response_body = request
+        .call()
+        .with_context(|| format!("failed to search Maven Central for {query}"))?
+        .into_string()
+        .context("failed to read Maven Central search response")?;
+    let response: serde_json::Value = serde_json::from_str(&response_body)
+        .context("failed to parse Maven Central search response")?;
+    let search_response = response
+        .get("response")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let docs = search_response
+        .get("docs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let artifacts = docs.iter().map(search_doc_json).collect::<Vec<_>>();
+    if cmd.json {
+        let payload = serde_json::json!({
+            "query": query,
+            "numFound": search_response.get("numFound").and_then(|value| value.as_u64()).unwrap_or(artifacts.len() as u64),
+            "artifacts": artifacts,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        for artifact in artifacts {
+            println!(
+                "{}\t{}\t{}\t{} versions",
+                artifact
+                    .get("artifact")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(""),
+                artifact
+                    .get("version")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(""),
+                artifact
+                    .get("packaging")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(""),
+                artifact
+                    .get("versionCount")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1),
+            );
+        }
+    }
+    Ok(0)
+}
+
+fn maven_search_endpoint() -> String {
+    let base = std::env::var("JBX_MAVEN_SEARCH_URL")
+        .unwrap_or_else(|_| "https://search.maven.org".to_string());
+    if base.ends_with("/solrsearch/select") {
+        base
+    } else {
+        format!("{}/solrsearch/select", base.trim_end_matches('/'))
+    }
+}
+
+fn maven_search_query(parts: &[String]) -> (String, bool) {
+    let raw = parts.join(" ");
+    let coord_parts = raw.split(':').collect::<Vec<_>>();
+    if (coord_parts.len() == 2 || coord_parts.len() == 3)
+        && coord_parts.iter().all(|part| !part.trim().is_empty())
+    {
+        let mut query = format!("g:{} AND a:{}", coord_parts[0], coord_parts[1]);
+        if coord_parts.len() == 3 {
+            query.push_str(&format!(" AND v:{}", coord_parts[2]));
+        }
+        return (query, coord_parts.len() == 3);
+    }
+    (raw, false)
+}
+
+fn search_doc_json(doc: &serde_json::Value) -> serde_json::Value {
+    let group = doc.get("g").and_then(|value| value.as_str()).unwrap_or("");
+    let artifact = doc.get("a").and_then(|value| value.as_str()).unwrap_or("");
+    let version = doc
+        .get("v")
+        .or_else(|| doc.get("latestVersion"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let coordinate = if group.is_empty() || artifact.is_empty() || version.is_empty() {
+        doc.get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string()
+    } else {
+        format!("{group}:{artifact}:{version}")
+    };
+    serde_json::json!({
+        "coordinate": coordinate,
+        "artifact": if group.is_empty() || artifact.is_empty() { doc.get("id").and_then(|value| value.as_str()).unwrap_or("").to_string() } else { format!("{group}:{artifact}") },
+        "groupId": group,
+        "artifactId": artifact,
+        "version": version,
+        "latestVersion": doc.get("latestVersion").and_then(|value| value.as_str()),
+        "packaging": doc.get("p").and_then(|value| value.as_str()).unwrap_or(""),
+        "versionCount": doc.get("versionCount").and_then(|value| value.as_u64()).unwrap_or(1),
+        "timestamp": doc.get("timestamp").and_then(|value| value.as_i64()),
+        "repositoryId": doc.get("repositoryId").and_then(|value| value.as_str()),
+        "classifiers": doc.get("ec").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "raw": doc,
+    })
 }
 
 fn tools_payload(script: &std::path::Path, output: &jbx::BuildOutput) -> serde_json::Value {
@@ -4737,6 +4873,7 @@ fn main() -> Result<()> {
             }
             0
         }
+        Some(Commands::Search(cmd)) => run_search(cmd)?,
         Some(Commands::Publish(cmd)) => run_publish(cmd)?,
         Some(Commands::Install(cmd)) => run_install(cmd)?,
         Some(Commands::Check(cmd)) => run_check(cmd)?,
