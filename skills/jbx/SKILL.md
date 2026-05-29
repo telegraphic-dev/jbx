@@ -43,8 +43,8 @@ jbx fetch <coordinates...>
 jbx export local <script.java|alias> [-o app.jar]
 jbx export portable <script.java|alias> [-o app.jar]
 jbx export native <script.java|alias> [-o app]
-jbx publish [script.java] --file jbx.json --dry-run
-jbx publish [script.java] --file jbx.json --publish
+jbx publish [script.java] --file jbx.json --dry-run --gpg-key <key-id>
+CENTRAL_TOKEN_USERNAME=... CENTRAL_TOKEN_PASSWORD=... jbx publish [script.java] --file jbx.json --publish --gpg-key <key-id>
 jbx install [script.java] --file jbx.json
 jbx jdk list
 jbx jdk home [version]
@@ -52,6 +52,8 @@ jbx jdk install <version>
 ```
 
 Use `--json` when another tool or agent needs stable machine-readable output.
+
+Publishing requires signing plus Maven Central Portal credentials. Use `--gpg-key <key-id>` for signed Central-ready bundles. Supply either `CENTRAL_TOKEN_USERNAME` plus `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` as `base64(username:password)`. Use `--skip-signing` only for local inspection, not real publishing.
 
 ## Agent Workflow
 
