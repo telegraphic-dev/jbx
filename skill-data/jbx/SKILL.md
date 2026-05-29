@@ -55,7 +55,7 @@ jbx jdk home [version]
 jbx jdk install <version>
 ```
 
-Use `--json` when another tool or agent needs stable machine-readable output.
+Use `--json` when another tool or agent needs stable machine-readable output. With `jbx test --coverage --json`, the JSON includes a `coverage` object with JaCoCo exec/html/xml paths and aggregate counters.
 
 ## Source Rewriting
 
