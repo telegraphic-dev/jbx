@@ -92,6 +92,8 @@ enum Commands {
     Test(TestCommand),
     /// Format Java source files with Palantir Java Format.
     Fmt(FmtCommand),
+    /// Convert Java source to/from JavaParser's native JSON serialization
+    Graph(GraphCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
 }
@@ -505,6 +507,44 @@ struct FmtCommand {
     /// Java source files or directories. Defaults to the current directory.
     #[arg(default_value = ".")]
     paths: Vec<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct GraphCommand {
+    #[command(subcommand)]
+    command: GraphSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum GraphSubcommand {
+    /// Convert a Java source file to JavaParser's native JSON serialization.
+    Dump(GraphDumpCommand),
+    /// Convert JavaParser's native JSON serialization back to Java source.
+    Import(GraphImportCommand),
+}
+
+#[derive(Parser, Debug)]
+struct GraphDumpCommand {
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Java source file.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct GraphImportCommand {
+    /// Write Java source to this file instead of stdout.
+    #[arg(long = "output", short = 'o')]
+    output: Option<PathBuf>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// JavaParser JSON file.
+    json: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -3759,6 +3799,8 @@ const PALANTIR_MAIN_CLASS: &str = "com.palantir.javaformat.java.Main";
 const COMPACT_WRAPPER_CLASS: &str = "__JuvFormatterWrapper";
 const PALANTIR_GROUP_ID: &str = "com.palantir.javaformat";
 const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
+const JBX_GRAPH_HELPER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-graph:0.1.1";
+const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
 
 #[derive(Debug, Clone)]
 enum FormatterBackend {
@@ -3941,6 +3983,66 @@ fn cache_root(cache_dir: Option<&Path>) -> Result<PathBuf> {
         Some(path) => path.to_path_buf(),
         None => default_cache_dir()?,
     })
+}
+
+struct GraphBackend {
+    java: PathBuf,
+    classpath: Vec<PathBuf>,
+}
+
+fn run_graph_dump(cmd: GraphDumpCommand) -> Result<i32> {
+    let backend = resolve_graph_backend(cmd.cache_dir.as_deref())?;
+    let args = vec!["dump".to_string(), cmd.script.to_string_lossy().to_string()];
+    let output = run_graph_helper(&backend, &args)?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(output.status.code().unwrap_or(1))
+}
+
+fn run_graph_import(cmd: GraphImportCommand) -> Result<i32> {
+    let backend = resolve_graph_backend(cmd.cache_dir.as_deref())?;
+    let mut args = vec!["import".to_string(), cmd.json.to_string_lossy().to_string()];
+    if let Some(output) = cmd.output {
+        args.push("--output".to_string());
+        args.push(output.to_string_lossy().to_string());
+    }
+    let output = run_graph_helper(&backend, &args)?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(output.status.code().unwrap_or(1))
+}
+
+fn resolve_graph_backend(cache_dir: Option<&Path>) -> Result<GraphBackend> {
+    let repos = vec![jbx::resolver::Repository::central()];
+    let cache = cache_root(cache_dir)?.join("deps");
+    let classpath = jbx::resolver::resolve_classpath(
+        &[JBX_GRAPH_HELPER_COORDINATE.to_string()],
+        &repos,
+        &cache,
+    )?;
+    let java = jbx::jdk::java_bin_path(&jbx::jdk::resolve_jdk(&None, true)?);
+    Ok(GraphBackend { java, classpath })
+}
+
+fn run_graph_helper(backend: &GraphBackend, args: &[String]) -> Result<std::process::Output> {
+    let mut command = ProcessCommand::new(&backend.java);
+    command
+        .arg("-Dorg.slf4j.simpleLogger.defaultLogLevel=warn")
+        .arg("-Dorg.slf4j.simpleLogger.showDateTime=true")
+        .arg("-cp")
+        .arg(
+            std::env::join_paths(&backend.classpath)
+                .context("failed to build graph helper classpath")?,
+        )
+        .arg(JBX_GRAPH_MAIN_CLASS)
+        .args(args);
+    command
+        .output()
+        .with_context(|| format!("failed to execute {}", backend.java.display()))
 }
 
 fn format_one_file(backend: &FormatterBackend, file: &Path, check: bool) -> Result<bool> {
@@ -6075,7 +6177,7 @@ fn print_check_human(payload: &serde_json::Value) -> Result<()> {
 const ERROR_PRONE_GROUP_ID: &str = "com.google.errorprone";
 const ERROR_PRONE_ARTIFACT_ID: &str = "error_prone_core";
 const DEFAULT_ERROR_PRONE_VERSION: &str = "2.39.0";
-const JBX_CHECK_COMPILER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-check:0.1.0";
+const JBX_CHECK_COMPILER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-check:0.1.1";
 const JBX_CHECK_COMPILER_MAIN_CLASS: &str = "dev.telegraphic.jbx.check.JbxCheckCompiler";
 
 const JUNIT_GROUP_ID: &str = "org.junit.platform";
@@ -6914,6 +7016,10 @@ fn main() -> Result<()> {
         Some(Commands::Check(cmd)) => run_check(cmd)?,
         Some(Commands::Test(cmd)) => run_tests(cmd)?,
         Some(Commands::Fmt(cmd)) => run_fmt(cmd)?,
+        Some(Commands::Graph(cmd)) => match cmd.command {
+            GraphSubcommand::Dump(cmd) => run_graph_dump(cmd)?,
+            GraphSubcommand::Import(cmd) => run_graph_import(cmd)?,
+        },
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
                 let jdks = jbx::jdk::list_jdks()?;

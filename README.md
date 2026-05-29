@@ -33,6 +33,8 @@ Implemented now:
 - `jbx run <alias>` / `jbx <alias>` run local catalog aliases
 - `jbx test [script.java|directory]` run JUnit tests with the standalone console launcher
 - `jbx fmt [path...]` format Java files with Palantir Java Format, including Java 25 compact scripts
+- `jbx graph dump <script.java>` print JavaParser's native AST JSON serialization
+- `jbx graph import <ast.json> [-o script.java]` convert JavaParser's native AST JSON serialization back to Java source
 - `jbx export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `jbx export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
 - `jbx export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
@@ -102,6 +104,9 @@ Implemented now:
 - `jbx docs <source|dir>` generates Markdown docs from local Java sources without writing cache entries
 - `jbx docs <group:artifact>` resolves the latest Maven release metadata before fetching `artifact-version-jbx-docs.md`
 - `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace; see [`docs/jbx-docs-schema.md`](docs/jbx-docs-schema.md) for the JSON shape
+- `jbx graph dump <script.java>` emits JavaParser's native JSON serialization directly; there is no jbx-specific graph text or custom JSON shape
+- `jbx graph import <ast.json>` deserializes JavaParser JSON and prints JavaParser-formatted Java source to stdout; pass `-o <script.java>` / `--output <script.java>` to write a file
+- Java 25 compact source files and `import module` declarations are parsed directly by JavaParser 3.28.1+
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies; Maven coordinates may be `group:artifact:version`, `group:artifact:classifier:version`, or just `group:artifact` to resolve the latest release from Maven metadata
