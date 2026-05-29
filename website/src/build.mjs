@@ -166,13 +166,30 @@ function shell({ title, description, body, route, rawPath }) {
 <body>
 <header class="site-header">
   <a class="mark" href="/"><img src="/assets/jbx-toolbox-logo-256.png" alt="jbx toolbox logo"><span>jbx</span></a>
-  <nav>${nav.map(([href, label]) => `<a href="${href}"${route === href ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
+  <nav>${nav.map(([href, label]) => `<a href="${href}"${route === href ? ' aria-current="page"' : ''}>${label}</a>`).join('')}<button class="theme-toggle" type="button" aria-label="Toggle light and dark theme">Theme</button></nav>
 </header>
 <main>${body}</main>
 <footer>
   <span>jbx by Telegraphic</span>
   <span>${mdLink}<a href="https://github.com/telegraphic-dev/jbx">GitHub</a><a href="/llms-full.txt">llms-full.txt</a></span>
 </footer>
+<script>
+(() => {
+  const key = 'jbx-theme';
+  const button = document.querySelector('.theme-toggle');
+  const preferred = () => matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  const apply = theme => {
+    document.documentElement.dataset.theme = theme;
+    if (button) button.textContent = theme === 'light' ? 'Dark' : 'Light';
+  };
+  apply(localStorage.getItem(key) || preferred());
+  button?.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    localStorage.setItem(key, next);
+    apply(next);
+  });
+})();
+</script>
 </body>
 </html>`;
 }
