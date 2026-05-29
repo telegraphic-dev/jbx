@@ -260,6 +260,37 @@ fn graph_dump_json_prints_ast_nodes() {
 }
 
 #[test]
+fn graph_dump_json_escapes_control_characters() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("ansi.java");
+    fs::write(
+        &source,
+        "void main() {\n    String reset = \"\\u001B[0m\";\n    IO.println(reset);\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\\u001B[0m"), "{stdout}");
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(value["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|node| node["kind"] == "literal" && node["value"] == "\u{001B}[0m"));
+}
+
+#[test]
 fn graph_patch_updates_string_literal_through_openrewrite_ast() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("Example.java");

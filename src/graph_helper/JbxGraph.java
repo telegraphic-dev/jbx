@@ -12,6 +12,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.InMemoryExecutionContext;
 import org.openrewrite.SourceFile;
@@ -24,6 +27,7 @@ import org.openrewrite.java.tree.JavaType;
 public final class JbxGraph {
     private static final Pattern TOKEN = Pattern.compile("(\\w+)=\\\"((?:\\\\.|[^\\\"])*)\\\"");
     private static final String COMPACT_WRAPPER_CLASS = "__JbxCompactSource";
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private JbxGraph() {}
 
@@ -205,32 +209,19 @@ public final class JbxGraph {
         return body.toString();
     }
 
-    private static String jsonGraph(Path source, String hash, List<Node> nodes) {
-        StringBuilder json = new StringBuilder();
-        json.append("{\n");
-        json.append("  \"version\": \"jbx-graph v1\",\n");
-        json.append("  \"graphHash\": \"").append(hash).append("\",\n");
-        json.append("  \"path\": \"").append(jsonEsc(source.toString())).append("\",\n");
-        json.append("  \"nodes\": [\n");
-        for (int i = 0; i < nodes.size(); i++) {
-            Node node = nodes.get(i);
-            json.append("    {\"id\": \"#")
-                    .append(jsonEsc(node.id()))
-                    .append("\", \"kind\": \"")
-                    .append(jsonEsc(node.kind()))
-                    .append("\", \"")
-                    .append(jsonEsc(node.field()))
-                    .append("\": \"")
-                    .append(jsonEsc(node.value()))
-                    .append("\"}");
-            if (i + 1 < nodes.size()) {
-                json.append(',');
-            }
-            json.append('\n');
+    private static String jsonGraph(Path source, String hash, List<Node> nodes) throws IOException {
+        ObjectNode root = JSON.createObjectNode();
+        root.put("version", "jbx-graph v1");
+        root.put("graphHash", hash);
+        root.put("path", source.toString());
+        ArrayNode nodeArray = root.putArray("nodes");
+        for (Node node : nodes) {
+            ObjectNode jsonNode = nodeArray.addObject();
+            jsonNode.put("id", "#" + node.id());
+            jsonNode.put("kind", node.kind());
+            jsonNode.put(node.field(), node.value());
         }
-        json.append("  ]\n");
-        json.append("}\n");
-        return json.toString();
+        return JSON.writerWithDefaultPrettyPrinter().writeValueAsString(root) + "\n";
     }
 
     private static ParsedSource parse(Path source) throws IOException {
@@ -320,14 +311,6 @@ public final class JbxGraph {
             out.append('\\');
         }
         return out.toString();
-    }
-
-    private static String jsonEsc(String value) {
-        return value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
     }
 
     private static boolean isCompactSource(String source) {
