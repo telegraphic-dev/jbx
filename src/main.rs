@@ -86,6 +86,8 @@ enum Commands {
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
     Fetch(FetchCommand),
+    /// Search Maven Central for artifacts.
+    Search(SearchCommand),
     /// Run JUnit tests with the standalone console launcher.
     Test(TestCommand),
     /// Format Java source files with Palantir Java Format.
@@ -1036,6 +1038,32 @@ struct FetchCommand {
     /// Print resolved coordinates instead of classpath.
     #[arg(long = "deps-only")]
     deps_only: bool,
+}
+
+#[derive(Parser, Debug)]
+struct SearchCommand {
+    /// Search text, Solr query, or Maven coordinate (group:artifact[:version]).
+    query: Vec<String>,
+
+    /// Solr groupId filter (maps to g:<group>).
+    #[arg(long = "group")]
+    group: Option<String>,
+
+    /// Solr artifactId filter (maps to a:<id>).
+    #[arg(long = "id", alias = "artifact", alias = "artifact-id")]
+    id: Option<String>,
+
+    /// Solr version filter (maps to v:<version> and searches the gav core).
+    #[arg(long = "version")]
+    version: Option<String>,
+
+    /// Maximum number of results to return.
+    #[arg(long = "limit", short = 'n', default_value_t = 20)]
+    limit: usize,
+
+    /// Return structured JSON for agent/tool consumption.
+    #[arg(long = "json")]
+    json: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -3399,6 +3427,292 @@ fn print_catalogs(json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn run_search(cmd: SearchCommand) -> Result<i32> {
+    let (query, use_gav_core) = maven_search_query(&cmd)?;
+    let endpoint = maven_search_endpoint();
+    let rows = maven_search_fetch_rows(cmd.limit).to_string();
+    let mut request = ureq::get(&endpoint)
+        .query("q", &query)
+        .query("rows", &rows)
+        .query("wt", "json")
+        .set("User-Agent", "jbx");
+    if use_gav_core {
+        request = request.query("core", "gav");
+    }
+    let response_body = request
+        .call()
+        .with_context(|| format!("failed to search Maven Central for {query}"))?
+        .into_string()
+        .context("failed to read Maven Central search response")?;
+    let response: serde_json::Value = serde_json::from_str(&response_body)
+        .context("failed to parse Maven Central search response")?;
+    let search_response = response
+        .get("response")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let docs = search_response
+        .get("docs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let total_found_fallback = docs.len() as u64;
+    let mut artifacts = docs.iter().map(search_doc_json).collect::<Vec<_>>();
+    let exact_artifact_id = maven_search_exact_artifact_id(&cmd);
+    sort_search_artifacts_by_popularity(&mut artifacts, exact_artifact_id.as_deref());
+    artifacts.truncate(cmd.limit);
+    if cmd.json {
+        let payload = serde_json::json!({
+            "query": query,
+            "numFound": search_response.get("numFound").and_then(|value| value.as_u64()).unwrap_or(total_found_fallback),
+            "artifacts": artifacts,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        print_search_table(&artifacts);
+    }
+    Ok(0)
+}
+
+fn maven_search_endpoint() -> String {
+    let base = std::env::var("JBX_MAVEN_SEARCH_URL")
+        .unwrap_or_else(|_| "https://search.maven.org".to_string());
+    if base.ends_with("/solrsearch/select") {
+        base
+    } else {
+        format!("{}/solrsearch/select", base.trim_end_matches('/'))
+    }
+}
+
+fn maven_search_fetch_rows(limit: usize) -> usize {
+    limit.max(100)
+}
+
+fn maven_search_query(cmd: &SearchCommand) -> Result<(String, bool)> {
+    let raw = cmd.query.join(" ");
+    let has_filters = cmd.group.is_some() || cmd.id.is_some() || cmd.version.is_some();
+    if has_filters {
+        let mut clauses = Vec::new();
+        if !raw.trim().is_empty() {
+            clauses.push(raw.trim().to_string());
+        }
+        if let Some(group) = cmd
+            .group
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            clauses.push(format!("g:{}", group.trim()));
+        }
+        if let Some(id) = cmd.id.as_deref().filter(|value| !value.trim().is_empty()) {
+            clauses.push(format!("a:{}", id.trim()));
+        }
+        if let Some(version) = cmd
+            .version
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            clauses.push(format!("v:{}", version.trim()));
+        }
+        if clauses.is_empty() {
+            anyhow::bail!("search requires a query or at least one filter");
+        }
+        let version_in_query = clauses.iter().any(|clause| clause.starts_with("v:"));
+        return Ok((clauses.join(" AND "), version_in_query));
+    }
+
+    if raw.trim().is_empty() {
+        anyhow::bail!("search requires a query or at least one filter");
+    }
+    let coord_parts = raw.split(':').collect::<Vec<_>>();
+    if (coord_parts.len() == 2 || coord_parts.len() == 3)
+        && coord_parts.iter().all(|part| !part.trim().is_empty())
+    {
+        let mut query = format!("g:{} AND a:{}", coord_parts[0], coord_parts[1]);
+        if coord_parts.len() == 3 {
+            query.push_str(&format!(" AND v:{}", coord_parts[2]));
+        }
+        return Ok((query, coord_parts.len() == 3));
+    }
+    Ok((raw, false))
+}
+
+fn maven_search_exact_artifact_id(cmd: &SearchCommand) -> Option<String> {
+    if let Some(id) = cmd.id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        return Some(id.to_string());
+    }
+
+    let raw = cmd.query.join(" ");
+    let raw = raw.trim();
+    if raw.is_empty() || raw.split_whitespace().count() > 1 {
+        return None;
+    }
+
+    let coord_parts = raw.split(':').collect::<Vec<_>>();
+    if (coord_parts.len() == 2 || coord_parts.len() == 3)
+        && coord_parts.iter().all(|part| !part.trim().is_empty())
+    {
+        return Some(coord_parts[1].trim().to_string());
+    }
+
+    if raw.contains(':') {
+        None
+    } else {
+        Some(raw.to_string())
+    }
+}
+
+fn sort_search_artifacts_by_popularity(
+    artifacts: &mut [serde_json::Value],
+    exact_artifact_id: Option<&str>,
+) {
+    artifacts.sort_by(|left, right| {
+        let left_exact = search_artifact_id_matches(left, exact_artifact_id);
+        let right_exact = search_artifact_id_matches(right, exact_artifact_id);
+        right_exact
+            .cmp(&left_exact)
+            .then_with(|| {
+                let left_versions = left
+                    .get("versionCount")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1);
+                let right_versions = right
+                    .get("versionCount")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1);
+                right_versions.cmp(&left_versions)
+            })
+            .then_with(|| {
+                let left_timestamp = left
+                    .get("timestamp")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0);
+                let right_timestamp = right
+                    .get("timestamp")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0);
+                right_timestamp.cmp(&left_timestamp)
+            })
+            .then_with(|| search_artifact_name(left).cmp(&search_artifact_name(right)))
+    });
+}
+
+fn search_artifact_id_matches(
+    artifact: &serde_json::Value,
+    exact_artifact_id: Option<&str>,
+) -> bool {
+    exact_artifact_id
+        .and_then(|id| {
+            artifact
+                .get("artifactId")
+                .or_else(|| artifact.get("a"))
+                .and_then(|value| value.as_str())
+                .map(|artifact_id| artifact_id.eq_ignore_ascii_case(id))
+        })
+        .unwrap_or(false)
+}
+
+fn print_search_table(artifacts: &[serde_json::Value]) {
+    if artifacts.is_empty() {
+        return;
+    }
+    let headers = ["ARTIFACT", "VERSION", "PACKAGING", "VERSIONS"];
+    let rows = artifacts
+        .iter()
+        .map(|artifact| {
+            [
+                search_artifact_name(artifact),
+                search_artifact_field(artifact, "version"),
+                search_artifact_field(artifact, "packaging"),
+                artifact
+                    .get("versionCount")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1)
+                    .to_string(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let mut widths = [
+        headers[0].len(),
+        headers[1].len(),
+        headers[2].len(),
+        headers[3].len(),
+    ];
+    for row in &rows {
+        for (idx, value) in row.iter().enumerate() {
+            widths[idx] = widths[idx].max(value.len());
+        }
+    }
+    println!(
+        "{:<w0$}  {:<w1$}  {:<w2$}  {}",
+        headers[0],
+        headers[1],
+        headers[2],
+        headers[3],
+        w0 = widths[0],
+        w1 = widths[1],
+        w2 = widths[2]
+    );
+    for row in rows {
+        println!(
+            "{:<w0$}  {:<w1$}  {:<w2$}  {}",
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            w0 = widths[0],
+            w1 = widths[1],
+            w2 = widths[2]
+        );
+    }
+}
+
+fn search_artifact_name(artifact: &serde_json::Value) -> String {
+    artifact
+        .get("artifact")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn search_artifact_field(artifact: &serde_json::Value, field: &str) -> String {
+    artifact
+        .get(field)
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn search_doc_json(doc: &serde_json::Value) -> serde_json::Value {
+    let group = doc.get("g").and_then(|value| value.as_str()).unwrap_or("");
+    let artifact = doc.get("a").and_then(|value| value.as_str()).unwrap_or("");
+    let version = doc
+        .get("v")
+        .or_else(|| doc.get("latestVersion"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let coordinate = if group.is_empty() || artifact.is_empty() || version.is_empty() {
+        doc.get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string()
+    } else {
+        format!("{group}:{artifact}:{version}")
+    };
+    serde_json::json!({
+        "coordinate": coordinate,
+        "artifact": if group.is_empty() || artifact.is_empty() { doc.get("id").and_then(|value| value.as_str()).unwrap_or("").to_string() } else { format!("{group}:{artifact}") },
+        "groupId": group,
+        "artifactId": artifact,
+        "version": version,
+        "latestVersion": doc.get("latestVersion").and_then(|value| value.as_str()),
+        "packaging": doc.get("p").and_then(|value| value.as_str()).unwrap_or(""),
+        "versionCount": doc.get("versionCount").and_then(|value| value.as_u64()).unwrap_or(1),
+        "timestamp": doc.get("timestamp").and_then(|value| value.as_i64()),
+        "repositoryId": doc.get("repositoryId").and_then(|value| value.as_str()),
+        "classifiers": doc.get("ec").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "raw": doc,
+    })
 }
 
 fn tools_payload(script: &std::path::Path, output: &jbx::BuildOutput) -> serde_json::Value {
@@ -6593,6 +6907,7 @@ fn main() -> Result<()> {
             }
             0
         }
+        Some(Commands::Search(cmd)) => run_search(cmd)?,
         Some(Commands::Publish(cmd)) => run_publish(cmd)?,
         Some(Commands::Install(cmd)) => run_install(cmd)?,
         Some(Commands::Docs(cmd)) => run_docs(cmd)?,

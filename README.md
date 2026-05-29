@@ -50,6 +50,7 @@ Implemented now:
 - `jbx info compile-options|runtime-options|native-options|javaagents|manifest <script.java>`
 - `jbx <GAV|script.java> [args...]` run a Java script or Maven executable tool
 - `jbx --main <class> <GAV> -- [args...]` run a main class with the resolved classpath
+- `jbx search [text|group:artifact[:version]] [--group G] [--id A] [--limit N] [--json]` search Maven Central artifacts
 - directive parsing for:
   - `//JAVA`
   - `//DEPS`
@@ -109,6 +110,7 @@ Implemented now:
 - `jbx resolve --classpath <coordinates...>` resolve to classpath
 - `jbx fetch <coordinates...>` fetch artifacts and print classpath
 - `jbx fetch --deps-only <coordinates...>` print coordinates instead of paths
+- `jbx search <text|group:artifact[:version]>` queries Maven Central Search; `--group`, `--id`/`--artifact-id`, and `--version` add Solr field filters (`g`, `a`, `v`); default text output is an aligned table sorted by version-count popularity, and `--json` returns structured `query`, `numFound`, and `artifacts` for agents
 - `jbx jdk list` list discovered/cached JDKs
 - `jbx jdk home [version]` print the JDK home for a version (default: 25)
 - `jbx jdk install <version>` download a Temurin JDK from Adoptium
