@@ -35,10 +35,10 @@ jbx build <script.java>
 jbx check [path...] [--json]
 jbx test [script.java|directory]
 jbx fmt [path...]
-jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path]
-jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path]
-jbx rewrite modules [--search term] [--json]
-jbx rewrite recipes <short|GAV> [--search term] [--json]
+jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
+jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
+jbx rewrite modules [--search term] [--limit n] [--json] [--rewrite-version version]
+jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json]
 jbx docs <GAV|source|dir> [--json]
 jbx search <text|group:artifact[:version]> [--json]
 jbx resolve <coordinates...>
@@ -64,6 +64,7 @@ Use `jbx rewrite patch` before mutating sources. It resolves OpenRewrite with jb
 ```sh
 jbx rewrite patch --recipe auto-format --source src/main/java
 jbx rewrite patch --module yaml --recipe org.openrewrite.yaml.format.AutoFormat --source config
+jbx rewrite patch --recipe change-package --option old=com.old --option new=com.new --source src --json
 ```
 
 Use `jbx rewrite apply` only after inspecting the patch or when the task explicitly asks for mutation:
@@ -73,14 +74,16 @@ jbx rewrite apply --recipe cleanup --source src/main/java
 jbx rewrite apply --module org.openrewrite.recipe:rewrite-migrate-java:RELEASE --recipe org.openrewrite.java.migrate.UpgradeToJava21 --source src
 ```
 
+Run-mode options: `--option key=value` passes recipe options, `--report dir` changes where `rewrite.patch` is written, `--json` prints a machine-readable summary, `--fail-on-changes` exits 2 when a recipe would change files, `--no-fail-on-invalid-recipes` continues past invalid active recipes, `--cache-dir dir` changes the helper/dependency cache, `--repo id=url` adds recipe repositories, and `--rewrite-version version` pins the OpenRewrite version used for built-in modules.
+
 Useful discovery commands:
 
 ```sh
 jbx rewrite modules --search yaml --json
-jbx rewrite recipes yaml --search format --json
+jbx rewrite recipes yaml --search format --detail --json
 ```
 
-Known recipe aliases include `auto-format`, `cleanup`, `remove-unused-imports`, and `change-package`. Known module aliases include `yaml`, `xml`, `properties`, `json`, `migrate-java`, and `static-analysis`. Java recipe support is built in; extra modules are resolved only when supplied with `--module`.
+Known recipe aliases include `auto-format`, `format`, `cleanup`, `remove-unused-imports`, and `change-package`. Known module aliases are `java`, `java-21`, `xml`, `yaml`, `properties`, `json`, `maven`, `gradle`, `groovy`, `kotlin`, `protobuf`, and `hcl`. Java recipe support is built in; extra modules are resolved only when supplied with `--module`.
 
 Publishing requires signing plus Maven Central Portal credentials. Use `--gpg-key <key-id>` for signed Central-ready bundles. Supply either `CENTRAL_TOKEN_USERNAME` plus `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` as `base64(username:password)`. Use `--skip-signing` only for local inspection, not real publishing.
 
