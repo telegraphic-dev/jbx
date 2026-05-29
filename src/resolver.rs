@@ -1231,10 +1231,11 @@ fn dependency_download_parallelism(artifact_count: usize) -> usize {
     if artifact_count == 0 {
         return 0;
     }
+    let minimum = artifact_count.min(2);
     std::thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(4)
-        .clamp(1, 8)
+        .clamp(minimum, 8)
         .min(artifact_count)
 }
 
@@ -1860,45 +1861,60 @@ mod tests {
     fn downloads_missing_jars_in_parallel() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::sync::Arc;
         use std::time::Duration;
 
         let active = Arc::new(AtomicUsize::new(0));
         let max_active = Arc::new(AtomicUsize::new(0));
+        let stop_server = Arc::new(AtomicBool::new(false));
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
         let server_active = Arc::clone(&active);
         let server_max_active = Arc::clone(&max_active);
-        let expected_connections = 8;
+        let server_stop = Arc::clone(&stop_server);
         let server = std::thread::spawn(move || {
-            for stream in listener.incoming().take(expected_connections) {
-                let active = Arc::clone(&server_active);
-                let max_active = Arc::clone(&server_max_active);
-                std::thread::spawn(move || {
-                    let mut stream = stream.unwrap();
-                    let mut buf = [0; 1024];
-                    let bytes = stream.read(&mut buf).unwrap();
-                    let request = String::from_utf8_lossy(&buf[..bytes]);
-                    let path = request
-                        .lines()
-                        .next()
-                        .and_then(|line| line.split_whitespace().nth(1))
-                        .unwrap_or("/");
-                    if path.ends_with(".jar") {
-                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
-                        max_active.fetch_max(current, Ordering::SeqCst);
-                        std::thread::sleep(Duration::from_millis(150));
-                        active.fetch_sub(1, Ordering::SeqCst);
-                        stream
-                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\njar")
-                            .unwrap();
-                    } else {
-                        stream
-                            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
-                            .unwrap();
+            let mut handlers = Vec::new();
+            while !server_stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let active = Arc::clone(&server_active);
+                        let max_active = Arc::clone(&server_max_active);
+                        handlers.push(std::thread::spawn(move || {
+                            let mut buf = [0; 1024];
+                            let bytes = stream.read(&mut buf).unwrap();
+                            let request = String::from_utf8_lossy(&buf[..bytes]);
+                            let path = request
+                                .lines()
+                                .next()
+                                .and_then(|line| line.split_whitespace().nth(1))
+                                .unwrap_or("/");
+                            if path.ends_with(".jar") {
+                                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                                max_active.fetch_max(current, Ordering::SeqCst);
+                                std::thread::sleep(Duration::from_millis(150));
+                                active.fetch_sub(1, Ordering::SeqCst);
+                                stream
+                                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\njar")
+                                    .unwrap();
+                            } else {
+                                stream
+                                    .write_all(
+                                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
+                                    )
+                                    .unwrap();
+                            }
+                        }));
                     }
-                });
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("test server failed to accept connection: {e}"),
+                }
+            }
+            for handler in handlers {
+                handler.join().unwrap();
             }
         });
 
@@ -1927,6 +1943,7 @@ mod tests {
             max_active.load(Ordering::SeqCst) > 1,
             "expected concurrent JAR downloads"
         );
+        stop_server.store(true, Ordering::SeqCst);
         server.join().unwrap();
     }
 
