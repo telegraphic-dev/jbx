@@ -531,7 +531,7 @@ enum RewriteSubcommand {
     Apply(RewriteRunCommand),
     /// Preview OpenRewrite recipes and write rewrite/rewrite.patch without modifying sources.
     Patch(RewriteRunCommand),
-    /// List standard OpenRewrite modules known by jbx.
+    /// Search Maven Central for OpenRewrite modules.
     Modules(RewriteModulesCommand),
     /// List or search recipes available from an OpenRewrite module.
     Recipes(RewriteRecipesCommand),
@@ -586,9 +586,13 @@ struct RewriteRunCommand {
 
 #[derive(Parser, Debug)]
 struct RewriteModulesCommand {
-    /// Filter modules by short name, coordinate, or description.
+    /// Filter Maven Central modules by recipe/module name.
     #[arg(long = "search")]
     search: Option<String>,
+
+    /// Maven groupId to search. Defaults to org.openrewrite.recipe and org.openrewrite.
+    #[arg(long = "group")]
+    groups: Vec<String>,
 
     /// Maximum number of modules to print.
     #[arg(long = "limit")]
@@ -3944,8 +3948,9 @@ const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
 const JBX_GRAPH_HELPER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-graph:0.1.1";
 const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
 const DEFAULT_OPENREWRITE_VERSION: &str = "8.56.1";
-const JBX_REWRITE_HELPER_SOURCE: &str = include_str!("rewrite_helper/JbxRewrite.java");
+const JBX_REWRITE_HELPER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-rewrite:0.1.2";
 const JBX_REWRITE_MAIN_CLASS: &str = "dev.telegraphic.jbx.rewrite.JbxRewrite";
+const SLF4J_VERSION: &str = "2.0.17";
 
 #[derive(Debug, Clone)]
 enum FormatterBackend {
@@ -4180,38 +4185,17 @@ fn run_rewrite_run(cmd: RewriteRunCommand, apply: bool) -> Result<i32> {
 }
 
 fn run_rewrite_modules(cmd: RewriteModulesCommand) -> Result<i32> {
-    let mut modules = rewrite_standard_modules()
-        .into_iter()
-        .filter(|module| rewrite_module_matches(module, cmd.search.as_deref()))
-        .collect::<Vec<_>>();
+    let mut modules = search_rewrite_modules(&cmd)?;
     if let Some(limit) = cmd.limit {
         modules.truncate(limit);
     }
     if cmd.json {
-        println!("[");
-        for (idx, module) in modules.iter().enumerate() {
-            let comma = if idx + 1 == modules.len() { "" } else { "," };
-            println!(
-                "  {{\"short\":\"{}\",\"coordinate\":\"{}\",\"description\":\"{}\"}}{}",
-                json_escape(module.short),
-                json_escape(&rewrite_module_coordinate(
-                    module.short,
-                    &cmd.rewrite_version
-                )),
-                json_escape(module.description),
-                comma
-            );
-        }
-        println!("]");
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&rewrite_modules_json(&modules))?
+        );
     } else {
-        for module in modules {
-            println!(
-                "{:<20} {}",
-                module.short,
-                rewrite_module_coordinate(module.short, &cmd.rewrite_version)
-            );
-            println!("  {}", module.description);
-        }
+        print_rewrite_module_table(&modules);
     }
     Ok(0)
 }
@@ -4264,96 +4248,234 @@ fn resolve_rewrite_backend(
     let repos = maven_tool::maven_repositories(repos);
     let cache = cache_root(cache_dir)?;
     let deps_cache = cache.join("deps");
+    let java_home = jbx::jdk::resolve_jdk(&None, true)?;
+    let java_major = jbx::jdk::detect_jdk_major_version(&java_home).ok_or_else(|| {
+        anyhow::anyhow!(
+            "failed to detect rewrite helper JDK version from {}",
+            java_home.display()
+        )
+    })?;
     let mut coordinates = BTreeSet::new();
-    coordinates.insert(format!("org.openrewrite:rewrite-core:{rewrite_version}"));
-    coordinates.insert(format!("org.openrewrite:rewrite-java:{rewrite_version}"));
-    coordinates.insert(format!("org.openrewrite:rewrite-java-21:{rewrite_version}"));
-    coordinates.insert("org.slf4j:slf4j-api:2.0.17".to_string());
-    coordinates.insert("org.slf4j:slf4j-nop:2.0.17".to_string());
+    coordinates.insert(rewrite_helper_coordinate());
+    coordinates.insert(rewrite_java_runtime_coordinate(java_major, rewrite_version));
+    coordinates.insert(format!("org.slf4j:slf4j-api:{SLF4J_VERSION}"));
+    coordinates.insert(format!("org.slf4j:slf4j-nop:{SLF4J_VERSION}"));
     for module in modules {
         coordinates.insert(rewrite_module_coordinate(module, rewrite_version));
     }
     let coordinate_vec = coordinates.into_iter().collect::<Vec<_>>();
-    let mut classpath = jbx::resolver::resolve_classpath(&coordinate_vec, &repos, &deps_cache)?;
-    let java_home = jbx::jdk::resolve_jdk(&Some("21".to_string()), true)?;
-    let helper_classes = compile_rewrite_helper(&cache, &classpath, &java_home)?;
-    classpath.push(helper_classes);
+    let classpath = jbx::resolver::resolve_classpath(&coordinate_vec, &repos, &deps_cache)?;
     let java = jbx::jdk::java_bin_path(&java_home);
     Ok(RewriteBackend { java, classpath })
 }
 
-#[derive(Clone, Copy)]
-struct RewriteModuleInfo {
-    short: &'static str,
-    description: &'static str,
+fn rewrite_helper_coordinate() -> String {
+    std::env::var("JBX_REWRITE_HELPER_COORDINATE")
+        .unwrap_or_else(|_| JBX_REWRITE_HELPER_COORDINATE.to_string())
 }
 
-fn rewrite_standard_modules() -> Vec<RewriteModuleInfo> {
-    vec![
-        RewriteModuleInfo {
-            short: "java",
-            description: "Core Java recipes and Java source parser support.",
-        },
-        RewriteModuleInfo {
-            short: "java-21",
-            description: "JDK 21 Java parser artifact used by jbx by default.",
-        },
-        RewriteModuleInfo {
-            short: "xml",
-            description: "XML recipes and parser support.",
-        },
-        RewriteModuleInfo {
-            short: "yaml",
-            description: "YAML recipes and parser support.",
-        },
-        RewriteModuleInfo {
-            short: "properties",
-            description: "Java properties-file recipes and parser support.",
-        },
-        RewriteModuleInfo {
-            short: "json",
-            description: "JSON recipes and parser support.",
-        },
-        RewriteModuleInfo {
-            short: "maven",
-            description: "Maven POM recipes; opt-in only, not loaded by default.",
-        },
-        RewriteModuleInfo {
-            short: "gradle",
-            description: "Gradle build-file recipes.",
-        },
-        RewriteModuleInfo {
-            short: "groovy",
-            description: "Groovy recipes and parser support.",
-        },
-        RewriteModuleInfo {
-            short: "kotlin",
-            description: "Kotlin recipes and parser support.",
-        },
-        RewriteModuleInfo {
-            short: "protobuf",
-            description: "Protocol Buffers recipes and parser support.",
-        },
-        RewriteModuleInfo {
-            short: "hcl",
-            description: "HashiCorp Configuration Language recipes and parser support.",
-        },
-    ]
-}
-
-fn rewrite_module_matches(module: &RewriteModuleInfo, search: Option<&str>) -> bool {
-    let Some(search) = search else {
-        return true;
+fn rewrite_java_runtime_coordinate(java_major: u32, version: &str) -> String {
+    let parser_major = match java_major {
+        0..=8 => 8,
+        9..=11 => 11,
+        12..=17 => 17,
+        18..=21 => 21,
+        _ => 25,
     };
-    let haystack = format!("{} {}", module.short, module.description).to_lowercase();
-    haystack.contains(&search.to_lowercase())
+    format!("org.openrewrite:rewrite-java-{parser_major}:{version}")
 }
 
 fn rewrite_module_coordinate(module: &str, version: &str) -> String {
     if module.contains(':') {
         module.to_string()
-    } else {
+    } else if rewrite_core_module_short_names().contains(&module) {
         format!("org.openrewrite:rewrite-{module}:{version}")
+    } else {
+        format!("org.openrewrite.recipe:rewrite-{module}:{version}")
+    }
+}
+
+fn rewrite_core_module_short_names() -> &'static [&'static str] {
+    &[
+        "java",
+        "java-21",
+        "java-25",
+        "xml",
+        "yaml",
+        "properties",
+        "json",
+        "maven",
+        "gradle",
+        "groovy",
+        "kotlin",
+        "protobuf",
+        "hcl",
+    ]
+}
+
+#[derive(Debug, Clone)]
+struct RewriteModuleInfo {
+    short: String,
+    coordinate: String,
+    group_id: String,
+    artifact_id: String,
+    version: String,
+    version_count: u64,
+}
+
+fn search_rewrite_modules(cmd: &RewriteModulesCommand) -> Result<Vec<RewriteModuleInfo>> {
+    let groups = if cmd.groups.is_empty() {
+        vec![
+            "org.openrewrite.recipe".to_string(),
+            "org.openrewrite".to_string(),
+        ]
+    } else {
+        cmd.groups.clone()
+    };
+    let mut modules = Vec::new();
+    for group in groups {
+        let query = rewrite_module_search_query(&group, cmd.search.as_deref());
+        let response = ureq::get(&maven_search_endpoint())
+            .query("q", &query)
+            .query(
+                "rows",
+                &maven_search_fetch_rows(cmd.limit.unwrap_or(20)).to_string(),
+            )
+            .query("wt", "json")
+            .set("User-Agent", "jbx")
+            .call()
+            .with_context(|| {
+                format!("failed to search Maven Central for OpenRewrite modules: {query}")
+            })?
+            .into_string()
+            .context("failed to read Maven Central module search response")?;
+        let response: serde_json::Value = serde_json::from_str(&response)
+            .context("failed to parse Maven Central module search response")?;
+        for doc in response
+            .get("response")
+            .and_then(|value| value.get("docs"))
+            .and_then(|value| value.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(module) = rewrite_module_from_search_doc(doc, cmd.search.as_deref()) {
+                modules.push(module);
+            }
+        }
+    }
+    modules.sort_by(|left, right| {
+        left.short
+            .cmp(&right.short)
+            .then_with(|| left.coordinate.cmp(&right.coordinate))
+    });
+    modules.dedup_by(|left, right| left.coordinate == right.coordinate);
+    Ok(modules)
+}
+
+fn rewrite_module_search_query(group: &str, search: Option<&str>) -> String {
+    match search.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(search) => format!("g:{group} AND {search}"),
+        None => format!("g:{group} AND a:rewrite\\-*"),
+    }
+}
+
+fn rewrite_module_from_search_doc(
+    doc: &serde_json::Value,
+    search: Option<&str>,
+) -> Option<RewriteModuleInfo> {
+    let group = doc.get("g")?.as_str()?;
+    let artifact = doc.get("a")?.as_str()?;
+    if !artifact.starts_with("rewrite-") {
+        return None;
+    }
+    let search = search.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(search) = search {
+        let needle = search.to_lowercase();
+        let haystack = format!("{group}:{artifact}").to_lowercase();
+        if !haystack.contains(&needle) {
+            return None;
+        }
+    }
+    let version = doc
+        .get("latestVersion")
+        .or_else(|| doc.get("v"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if version.is_empty() {
+        return None;
+    }
+    Some(RewriteModuleInfo {
+        short: artifact
+            .strip_prefix("rewrite-")
+            .unwrap_or(artifact)
+            .to_string(),
+        coordinate: format!("{group}:{artifact}:{version}"),
+        group_id: group.to_string(),
+        artifact_id: artifact.to_string(),
+        version: version.to_string(),
+        version_count: doc
+            .get("versionCount")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(1),
+    })
+}
+
+fn rewrite_modules_json(modules: &[RewriteModuleInfo]) -> serde_json::Value {
+    serde_json::Value::Array(
+        modules
+            .iter()
+            .map(|module| {
+                serde_json::json!({
+                    "short": module.short,
+                    "coordinate": module.coordinate,
+                    "groupId": module.group_id,
+                    "artifactId": module.artifact_id,
+                    "version": module.version,
+                    "versionCount": module.version_count,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn print_rewrite_module_table(modules: &[RewriteModuleInfo]) {
+    if modules.is_empty() {
+        return;
+    }
+    let headers = ["SHORT", "MODULE", "VERSION"];
+    let rows = modules
+        .iter()
+        .map(|module| {
+            [
+                module.short.clone(),
+                module.coordinate.clone(),
+                module.version.clone(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let mut widths = [headers[0].len(), headers[1].len(), headers[2].len()];
+    for row in &rows {
+        for (idx, value) in row.iter().enumerate() {
+            widths[idx] = widths[idx].max(value.len());
+        }
+    }
+    println!(
+        "{:<w0$}  {:<w1$}  {}",
+        headers[0],
+        headers[1],
+        headers[2],
+        w0 = widths[0],
+        w1 = widths[1]
+    );
+    for row in rows {
+        println!(
+            "{:<w0$}  {:<w1$}  {}",
+            row[0],
+            row[1],
+            row[2],
+            w0 = widths[0],
+            w1 = widths[1]
+        );
     }
 }
 
@@ -4393,62 +4515,6 @@ fn normalize_rewrite_option(option: &str, recipes: &[String]) -> Result<String> 
         raw_key
     };
     Ok(format!("{key}={value}"))
-}
-
-fn json_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn compile_rewrite_helper(
-    cache: &Path,
-    dependency_classpath: &[PathBuf],
-    java_home: &Path,
-) -> Result<PathBuf> {
-    let helper_root = cache.join("rewrite-helper");
-    let source_path = helper_root.join("src/dev/telegraphic/jbx/rewrite/JbxRewrite.java");
-    let classes_dir = helper_root.join("classes");
-    let stamp_path = helper_root.join("JbxRewrite.sha256");
-    let stamp = format!(
-        "{:x}",
-        <sha2::Sha256 as sha2::Digest>::digest(JBX_REWRITE_HELPER_SOURCE.as_bytes())
-    );
-    let current_stamp = fs::read_to_string(&stamp_path).unwrap_or_default();
-    if current_stamp.trim() == stamp
-        && classes_dir
-            .join("dev/telegraphic/jbx/rewrite/JbxRewrite.class")
-            .exists()
-    {
-        return Ok(classes_dir);
-    }
-    fs::create_dir_all(source_path.parent().unwrap())?;
-    if classes_dir.exists() {
-        fs::remove_dir_all(&classes_dir)?;
-    }
-    fs::create_dir_all(&classes_dir)?;
-    fs::write(&source_path, JBX_REWRITE_HELPER_SOURCE)?;
-    let javac = jbx::jdk::javac_bin_path(java_home);
-    let classpath = std::env::join_paths(dependency_classpath)
-        .context("failed to build rewrite helper compile classpath")?;
-    let output = ProcessCommand::new(&javac)
-        .arg("--release")
-        .arg("17")
-        .arg("-proc:none")
-        .arg("-cp")
-        .arg(classpath)
-        .arg("-d")
-        .arg(&classes_dir)
-        .arg(&source_path)
-        .output()
-        .with_context(|| format!("failed to execute {}", javac.display()))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "failed to compile rewrite helper\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    fs::write(stamp_path, stamp)?;
-    Ok(classes_dir)
 }
 
 fn run_rewrite_helper(backend: &RewriteBackend, args: &[String]) -> Result<std::process::Output> {
@@ -7739,6 +7805,30 @@ String value = example.readValue("{}", String.class);</pre>
         assert!(
             markdown.contains("- `T readValue(String content) throws IOException`"),
             "{markdown}"
+        );
+    }
+
+    #[test]
+    fn rewrite_runtime_parser_matches_selected_jdk_major() {
+        assert_eq!(
+            rewrite_java_runtime_coordinate(8, "8.56.1"),
+            "org.openrewrite:rewrite-java-8:8.56.1"
+        );
+        assert_eq!(
+            rewrite_java_runtime_coordinate(11, "8.56.1"),
+            "org.openrewrite:rewrite-java-11:8.56.1"
+        );
+        assert_eq!(
+            rewrite_java_runtime_coordinate(17, "8.56.1"),
+            "org.openrewrite:rewrite-java-17:8.56.1"
+        );
+        assert_eq!(
+            rewrite_java_runtime_coordinate(21, "8.56.1"),
+            "org.openrewrite:rewrite-java-21:8.56.1"
+        );
+        assert_eq!(
+            rewrite_java_runtime_coordinate(25, "8.56.1"),
+            "org.openrewrite:rewrite-java-25:8.56.1"
         );
     }
 

@@ -600,6 +600,11 @@ fn empty_to_none(value: &str) -> Option<&str> {
 
 /// Fetch a POM from repositories, trying each in order.
 pub fn fetch_pom(module: &Module, version: &str, repos: &[Repository]) -> Result<Project> {
+    if let Some(cached) = probe_local_pom(module, version) {
+        let body = fs::read_to_string(&cached)
+            .with_context(|| format!("failed to read local POM {}", cached.display()))?;
+        return parse_pom(&body).context(format!("failed to parse POM for {module}:{version}"));
+    }
     for repo in repos {
         let url = repo.pom_url(module, version);
         match ureq::get(&url).call() {
@@ -1345,6 +1350,20 @@ fn symlink_or_copy(src: &Path, dst: &Path) -> Result<()> {
 /// Returns the first matching path found, or None.
 pub fn probe_local_caches(module: &Module, version: &str, jar_name: &str) -> Option<PathBuf> {
     dirs::home_dir().and_then(|home| probe_local_caches_with_home(module, version, jar_name, &home))
+}
+
+fn probe_local_pom(module: &Module, version: &str) -> Option<PathBuf> {
+    dirs::home_dir().and_then(|home| {
+        let group_path = module.org.replace('.', "/");
+        let pom_name = format!("{}-{}.pom", module.name, version);
+        let pom_path = home
+            .join(".m2/repository")
+            .join(group_path)
+            .join(&module.name)
+            .join(version)
+            .join(pom_name);
+        pom_path.exists().then_some(pom_path)
+    })
 }
 
 /// Same as [`probe_local_caches`] but with an explicit home directory (testable).
