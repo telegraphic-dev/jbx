@@ -207,9 +207,13 @@ fn docs_local_jar_json_prefers_javadoc_and_supports_repeatable_type_filter() {
     fs::write(
         docs_dir.join("JarWidget.html"),
         r#"<!doctype html><html><body>
-<section class="class-description">public class JarWidget</section>
-<div class="member-signature"><span class="modifiers">public static final</span> <span class="return-type">String</span> <span class="element-name">KIND</span></div>
+<section class="class-description" id="class-description">
+<div class="type-signature"><span class="modifiers">public class </span><span class="element-name type-name-label">JarWidget</span></div>
+<div class="block">Widget docs with <code>inline code</code>.</div>
+</section>
+<div class="member-signature"><span class="modifiers">public static final</span> <span class="return-type">Comparator&lt;JarWidget&gt;</span> <span class="element-name">COMPARATOR</span></div>
 <div class="member-signature"><span class="modifiers">public</span> <span class="element-name">JarWidget</span><span class="parameters">(String name)</span></div>
+<div class="member-signature"><span class="modifiers">public</span> <span class="return-type">List&lt;JarWidget&gt;</span> <span class="element-name">children</span><span class="parameters">(Map&lt;String, Object&gt; options)</span></div>
 <div class="member-signature"><span class="modifiers">public</span> <span class="return-type">String</span> <span class="element-name">greet</span><span class="parameters">(String name)</span></div>
 <div class="member-signature"><span class="modifiers">protected</span> <span class="return-type">int</span> <span class="element-name">size</span><span class="parameters">()</span></div>
 </body></html>"#,
@@ -253,7 +257,17 @@ fn docs_local_jar_json_prefers_javadoc_and_supports_repeatable_type_filter() {
     assert_eq!(types.len(), 1, "type filters should trim javadoc output");
     let ty = &types[0];
     assert_eq!(ty["qualifiedName"], "dev.telegraphic.demo.JarWidget");
-    assert_eq!(ty["fields"][0]["name"], "KIND");
+    assert_eq!(ty["description"], "Widget docs with `inline code`.");
+    assert_eq!(ty["fields"][0]["name"], "COMPARATOR");
+    assert_eq!(ty["fields"][0]["type"], "Comparator<JarWidget>");
+    let children = ty["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|method| method["name"] == "children")
+        .unwrap();
+    assert_eq!(children["returnType"], "List<JarWidget>");
+    assert_eq!(children["parameters"][0]["type"], "Map<String, Object>");
     let greet = ty["methods"]
         .as_array()
         .unwrap()

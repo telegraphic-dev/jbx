@@ -2006,10 +2006,7 @@ fn split_type_and_name(input: &str) -> Option<(String, String)> {
 
 fn strip_leading_modifiers(input: &str) -> String {
     let mut rest = input.trim();
-    loop {
-        let Some((candidate, tail)) = rest.split_once(char::is_whitespace) else {
-            break;
-        };
+    while let Some((candidate, tail)) = rest.split_once(char::is_whitespace) {
         if !is_java_modifier(candidate) {
             break;
         }
@@ -2311,7 +2308,8 @@ fn extract_javadoc_type_description(html: &str) -> Option<String> {
 }
 
 fn html_fragment_to_markdown(input: &str) -> String {
-    let markdown = quick_html2md::html_to_markdown(&html_unescape(input));
+    let fragment = html_unescape(input);
+    let markdown = quick_html2md::html_to_markdown(&format!("<div>{fragment}</div>"));
     normalize_markdown_text(&markdown)
 }
 
@@ -2638,7 +2636,7 @@ fn qualify_name(package: &str, name: &str) -> String {
 }
 
 fn qualify_type(package: &str, name: &str) -> String {
-    let name = name.trim().trim_end_matches(',');
+    let name = normalize_java_type_spacing(name.trim().trim_end_matches(','));
     if let Some(simple) = name.strip_prefix("java.lang.") {
         return simple.to_string();
     }
@@ -2646,11 +2644,11 @@ fn qualify_type(package: &str, name: &str) -> String {
         .trim_end_matches("...")
         .split(['<', '['])
         .next()
-        .unwrap_or(name)
+        .unwrap_or(&name)
         .trim();
     if name.is_empty()
         || name == "void"
-        || is_type_variable(name)
+        || is_type_variable(&name)
         || is_primitive_type(base)
         || is_java_lang_type(base)
         || is_common_jdk_simple_type(base)
@@ -2660,8 +2658,47 @@ fn qualify_type(package: &str, name: &str) -> String {
     {
         name.to_string()
     } else {
-        qualify_name(package, name)
+        qualify_name(package, &name)
     }
+}
+
+fn normalize_java_type_spacing(input: &str) -> String {
+    let mut out = String::new();
+    let mut previous_was_space = false;
+    for ch in input.chars() {
+        match ch {
+            '<' | '>' | '[' | ']' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(ch);
+                previous_was_space = false;
+            }
+            ',' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(ch);
+                out.push(' ');
+                previous_was_space = true;
+            }
+            ch if ch.is_whitespace() => {
+                if !out.is_empty()
+                    && !previous_was_space
+                    && !out.ends_with('<')
+                    && !out.ends_with('[')
+                {
+                    out.push(' ');
+                    previous_was_space = true;
+                }
+            }
+            _ => {
+                out.push(ch);
+                previous_was_space = false;
+            }
+        }
+    }
+    out.trim().to_string()
 }
 
 fn is_type_variable(name: &str) -> bool {
@@ -6277,7 +6314,7 @@ String value = example.readValue("{}", String.class);</pre>
         assert_eq!(ty["methods"][0]["returnType"], "T");
         assert_eq!(ty["methods"][0]["parameters"][0]["name"], "content");
         assert_eq!(ty["methods"][0]["parameters"][1]["name"], "valueType");
-        assert_eq!(ty["methods"][0]["parameters"][1]["type"], "Class <T>");
+        assert_eq!(ty["methods"][0]["parameters"][1]["type"], "Class<T>");
         assert_eq!(ty["methods"][0]["parameters"][2]["name"], "features");
         assert_eq!(ty["methods"][0]["parameters"][2]["type"], "String...");
         assert_eq!(ty["methods"][0]["throws"][1], "IllegalArgumentException");
