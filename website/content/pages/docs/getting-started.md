@@ -23,6 +23,7 @@ jbx check src --json
 jbx fmt src
 jbx rewrite patch --recipe auto-format --source src/main/java --json
 jbx test
+jbx test --coverage   # writes JaCoCo data to target/jacoco.exec
 jbx skill get
 ```
 
