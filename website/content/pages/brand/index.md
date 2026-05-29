@@ -15,7 +15,7 @@ The identity starts from two things: a toolbox, because `jbx` is useful before i
 - [256px transparent PNG](/assets/jbx-toolbox-logo-256.png)
 - [Social card](/assets/social-card.png)
 
-The current artwork is generated and background-cleaned. Good enough for scaffolding; not sacred. A cleaner vector mark can replace it later without changing the brand system.
+The current artwork is generated and resized from the supplied transparent source. Good enough for scaffolding; not sacred. A cleaner vector mark can replace it later without changing the brand system.
 
 ## Colors
 
