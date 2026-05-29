@@ -9,7 +9,7 @@ jbx is the one-stop shop Java toolbox for agents and humans. Inspired by JBang, 
 
 Install this discovery skill once in an agent's skill manager. Keep it thin; the `jbx` binary serves version-matched workflow guidance for each installed release.
 
-Install the latest release:
+Install the latest native release:
 
 ```sh
 curl -fsSL https://jbx.telegraphic.dev/install.sh | bash

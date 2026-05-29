@@ -8,6 +8,8 @@ export PATH="$HOME/.jbx/bin:$PATH"
 jbx <GAV|script.java> [args...]
 ```
 
+The installer downloads a native release binary for Linux or macOS; Rust is only needed when building from source.
+
 This repository is intentionally aiming for JBang compatibility rather than inventing a new script format.
 
 ## Current slice

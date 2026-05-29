@@ -2,29 +2,67 @@
 set -eu
 
 bin="jbx"
-crate="jbx"
 version="${JBX_VERSION:-latest}"
 install_dir="${JBX_INSTALL_DIR:-$HOME/.jbx/bin}"
+repo="telegraphic-dev/jbx"
 
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "jbx installer: Rust/Cargo is required." >&2
-  echo "Install Rust from https://rustup.rs/, then rerun this script." >&2
-  exit 1
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "jbx installer: required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+case "$(uname -s)" in
+  Linux) os="unknown-linux-gnu" ;;
+  Darwin) os="apple-darwin" ;;
+  *)
+    echo "jbx installer: unsupported OS: $(uname -s)" >&2
+    exit 1
+    ;;
+esac
+
+case "$(uname -m)" in
+  x86_64|amd64) arch="x86_64" ;;
+  arm64|aarch64) arch="aarch64" ;;
+  *)
+    echo "jbx installer: unsupported architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+target="$arch-$os"
+asset="jbx-$target.tar.gz"
+
+if [ "$version" = "latest" ]; then
+  url="https://github.com/$repo/releases/latest/download/$asset"
+else
+  tag="$version"
+  case "$tag" in
+    v*) ;;
+    *) tag="v$tag" ;;
+  esac
+  url="https://github.com/$repo/releases/download/$tag/$asset"
 fi
 
+need tar
 mkdir -p "$install_dir"
 
 tmp="$(mktemp -d 2>/dev/null || mktemp -d -t jbx-install)"
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT INT TERM
 
-if [ "$version" = "latest" ]; then
-  cargo install "$crate" --locked --root "$tmp/root"
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL "$url" -o "$tmp/$asset"
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO "$tmp/$asset" "$url"
 else
-  cargo install "$crate" --version "${version#v}" --locked --root "$tmp/root"
+  echo "jbx installer: curl or wget is required." >&2
+  exit 1
 fi
 
-cp "$tmp/root/bin/$bin" "$install_dir/$bin"
+tar -xzf "$tmp/$asset" -C "$tmp"
+cp "$tmp/$bin" "$install_dir/$bin"
 chmod +x "$install_dir/$bin"
 
 case ":$PATH:" in

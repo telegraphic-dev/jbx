@@ -14,6 +14,8 @@ curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
 export PATH="$HOME/.jbx/bin:$PATH"
 ```
 
+The installer downloads a native Linux or macOS binary. Rust is only needed when building `jbx` from source.
+
 ```bash
 jbx run Hello.java world
 jbx build Hello.java

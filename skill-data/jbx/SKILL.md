@@ -11,7 +11,7 @@ Use this skill when working in a repository that uses `jbx`, when authoring Java
 
 ## Install
 
-Install the current release:
+Install the current native release:
 
 ```sh
 curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
