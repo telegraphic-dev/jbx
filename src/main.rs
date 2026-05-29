@@ -3485,13 +3485,8 @@ const PALANTIR_MAIN_CLASS: &str = "com.palantir.javaformat.java.Main";
 const COMPACT_WRAPPER_CLASS: &str = "__JuvFormatterWrapper";
 const PALANTIR_GROUP_ID: &str = "com.palantir.javaformat";
 const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
-const DEFAULT_JAVAPARSER_VERSION: &str = "3.28.1";
-const JAVAPARSER_GROUP_ID: &str = "com.github.javaparser";
-const JAVAPARSER_ARTIFACT_ID: &str = "javaparser-core";
-const JAVAPARSER_SERIALIZATION_ARTIFACT_ID: &str = "javaparser-core-serialization";
-const JAVAPARSER_JSON_PROVIDER_COORDINATE: &str = "org.eclipse.parsson:parsson:1.1.7";
+const JBX_GRAPH_HELPER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-graph:0.1.1";
 const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
-const JBX_GRAPH_HELPER_SOURCE: &str = include_str!("graph_helper/JbxGraph.java");
 
 #[derive(Debug, Clone)]
 enum FormatterBackend {
@@ -3709,79 +3704,14 @@ fn run_graph_import(cmd: GraphImportCommand) -> Result<i32> {
 
 fn resolve_graph_backend(cache_dir: Option<&Path>) -> Result<GraphBackend> {
     let repos = vec![jbx::resolver::Repository::central()];
-    let version = latest_cached_tool_version(
-        cache_dir,
-        JAVAPARSER_GROUP_ID,
-        JAVAPARSER_ARTIFACT_ID,
-        &repos,
-    )
-    .unwrap_or_else(|err| {
-        eprintln!(
-            "warning: could not determine latest JavaParser version: {err:#}; using {DEFAULT_JAVAPARSER_VERSION}"
-        );
-        DEFAULT_JAVAPARSER_VERSION.to_string()
-    });
     let cache = cache_root(cache_dir)?.join("deps");
-    let coordinates = [
-        format!("{JAVAPARSER_GROUP_ID}:{JAVAPARSER_ARTIFACT_ID}:{version}"),
-        format!("{JAVAPARSER_GROUP_ID}:{JAVAPARSER_SERIALIZATION_ARTIFACT_ID}:{version}"),
-        JAVAPARSER_JSON_PROVIDER_COORDINATE.to_string(),
-    ];
-    let mut classpath = jbx::resolver::resolve_classpath(&coordinates, &repos, &cache)?;
-    let helper_classes = compile_graph_helper(cache_dir, &classpath)?;
-    classpath.insert(0, helper_classes);
+    let classpath = jbx::resolver::resolve_classpath(
+        &[JBX_GRAPH_HELPER_COORDINATE.to_string()],
+        &repos,
+        &cache,
+    )?;
     let java = jbx::jdk::java_bin_path(&jbx::jdk::resolve_jdk(&None, true)?);
     Ok(GraphBackend { java, classpath })
-}
-
-fn compile_graph_helper(
-    cache_dir: Option<&Path>,
-    dependency_classpath: &[PathBuf],
-) -> Result<PathBuf> {
-    let root = cache_root(cache_dir)?.join("graph");
-    let source_dir = root.join("src/dev/telegraphic/jbx/graph");
-    let source = source_dir.join("JbxGraph.java");
-    let classes = root.join("classes");
-    let stamp = root.join("helper.sha256");
-    let digest = format!(
-        "{:x}",
-        <sha2::Sha256 as sha2::Digest>::digest(JBX_GRAPH_HELPER_SOURCE.as_bytes())
-    );
-    let current = fs::read_to_string(&stamp).unwrap_or_default();
-    if classes
-        .join("dev/telegraphic/jbx/graph/JbxGraph.class")
-        .exists()
-        && current.trim() == digest
-    {
-        return Ok(classes);
-    }
-    if classes.exists() {
-        fs::remove_dir_all(&classes)?;
-    }
-    fs::create_dir_all(&source_dir)?;
-    fs::create_dir_all(&classes)?;
-    fs::write(&source, JBX_GRAPH_HELPER_SOURCE)?;
-    let jdk = jbx::jdk::resolve_jdk(&None, true)?;
-    let javac = jbx::jdk::javac_bin_path(&jdk);
-    let output = ProcessCommand::new(&javac)
-        .arg("--release")
-        .arg("17")
-        .arg("-cp")
-        .arg(std::env::join_paths(dependency_classpath)?)
-        .arg("-d")
-        .arg(&classes)
-        .arg(&source)
-        .output()
-        .with_context(|| format!("failed to execute {}", javac.display()))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "failed to compile jbx graph JavaParser helper\n{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    fs::write(&stamp, format!("{digest}\n"))?;
-    Ok(classes)
 }
 
 fn run_graph_helper(backend: &GraphBackend, args: &[String]) -> Result<std::process::Output> {
@@ -5933,7 +5863,7 @@ fn print_check_human(payload: &serde_json::Value) -> Result<()> {
 const ERROR_PRONE_GROUP_ID: &str = "com.google.errorprone";
 const ERROR_PRONE_ARTIFACT_ID: &str = "error_prone_core";
 const DEFAULT_ERROR_PRONE_VERSION: &str = "2.39.0";
-const JBX_CHECK_COMPILER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-check:0.1.0";
+const JBX_CHECK_COMPILER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-check:0.1.1";
 const JBX_CHECK_COMPILER_MAIN_CLASS: &str = "dev.telegraphic.jbx.check.JbxCheckCompiler";
 
 const JUNIT_GROUP_ID: &str = "org.junit.platform";

@@ -122,10 +122,10 @@ fn check_runs_compiler_wrapper_from_published_maven_artifact() {
     let wrapper_jar_found = walkdir::WalkDir::new(&cache)
         .into_iter()
         .filter_map(Result::ok)
-        .any(|entry| entry.file_name() == "jbx-check-0.1.0.jar");
+        .any(|entry| entry.file_name() == "jbx-check-0.1.1.jar");
     assert!(
         wrapper_jar_found,
-        "expected check to resolve dev.telegraphic.jbx:jbx-check:0.1.0 into {}",
+        "expected check to resolve dev.telegraphic.jbx:jbx-check:0.1.1 into {}",
         cache.display()
     );
 }

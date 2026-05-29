@@ -56,6 +56,15 @@ fn graph_dump_prints_only_javaparser_json() {
         "must not emit jbx custom graph nodes"
     );
     assert!(!String::from_utf8_lossy(&out.stdout).starts_with("jbx-graph"));
+
+    let helper_jar_found = walkdir::WalkDir::new(tmp.path().join("cache"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name() == "jbx-graph-0.1.1.jar");
+    assert!(
+        helper_jar_found,
+        "expected graph to resolve dev.telegraphic.jbx:jbx-graph:0.1.1"
+    );
 }
 
 #[test]
