@@ -79,13 +79,15 @@ Run-mode options: `--option key=value` passes recipe options, `--report dir` cha
 Useful discovery commands:
 
 ```sh
-jbx rewrite modules --search yaml --json
+jbx rewrite modules --search yaml --group org.openrewrite --rewrite-version 8.60.0 --json
 jbx rewrite recipes yaml --search format --detail --json
 ```
 
 Known recipe aliases include `auto-format`, `format`, `cleanup`, `remove-unused-imports`, and `change-package`. Known module aliases are `java`, `java-21`, `xml`, `yaml`, `properties`, `json`, `maven`, `gradle`, `groovy`, `kotlin`, `protobuf`, and `hcl`. Java recipe support is built in; extra modules are resolved only when supplied with `--module`.
 
 Publishing requires signing plus Maven Central Portal credentials. Use `--gpg-key <key-id>` for signed Central-ready bundles. Supply either `CENTRAL_TOKEN_USERNAME` plus `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` as `base64(username:password)`. Use `--skip-signing` only for local inspection, not real publishing.
+
+For published dependency metadata, put compile-time artifact dependencies in `dependencies` in `jbx.json` or `//DEPS` in a script. Put runtime-only implementations in `runtimeDependencies` or `//RUNTIME`; jbx emits them to Maven metadata with runtime scope without adding them to the compile classpath.
 
 ## Agent Workflow
 

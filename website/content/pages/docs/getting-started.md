@@ -73,7 +73,7 @@ For CI-style checks, add `--fail-on-changes`. For custom recipe modules, add `--
 Discovery commands are machine-readable for agents:
 
 ```bash
-jbx rewrite modules --search yaml --group org.openrewrite.recipe --rewrite-version 8.60.0 --json
+jbx rewrite modules --search yaml --group org.openrewrite --rewrite-version 8.60.0 --json
 jbx rewrite recipes yaml --search format --detail --json
 ```
 

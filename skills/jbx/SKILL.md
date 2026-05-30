@@ -49,3 +49,7 @@ jbx docs <GAV|source|dir> [--json]
 jbx skill list
 jbx skill get
 ```
+
+## Publishing Metadata
+
+Use `dependencies` in `jbx.json` or `//DEPS` in a script for compile-time artifact dependencies. Use `runtimeDependencies` or `//RUNTIME` for runtime-only implementations; jbx emits those as Maven runtime-scope dependencies without making them part of the compile classpath.
