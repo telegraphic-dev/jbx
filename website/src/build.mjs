@@ -146,7 +146,7 @@ const nav = [
 
 function shell({ title, description, body, route, rawPath }) {
   const canonical = `${site.origin}${route === '/' ? '/' : route}`;
-  const mdLink = rawPath ? `<a href="${rawPath}">Markdown</a>` : '';
+  const mdLink = rawPath ? `<a href="${escapeHtml(rawPath)}">Markdown</a>` : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -155,7 +155,7 @@ function shell({ title, description, body, route, rawPath }) {
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description || site.description)}">
 <link rel="canonical" href="${canonical}">
-${rawPath ? `<link rel="alternate" type="text/markdown" href="${site.origin}${rawPath}">` : ''}
+${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.origin + rawPath)}">` : ''}
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description || site.description)}">
 <meta property="og:image" content="${site.origin}/assets/social-card.png">
