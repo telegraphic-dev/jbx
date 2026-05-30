@@ -191,6 +191,58 @@ class UseDep {{
 }
 
 #[test]
+fn check_compiles_source_directives_onto_classpath() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let source = tmp.path().join("UseHelper.java");
+    fs::write(
+        &source,
+        r#"
+//SOURCES Helper.java
+class UseHelper {
+  String message() {
+    return Helper.message();
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("Helper.java"),
+        r#"
+class Helper {
+  static String message() {
+    return "sources-ok";
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("check")
+        .arg("--java")
+        .arg("21")
+        .arg("--no-error-prone")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["ok"], true, "{stdout}");
+    assert_eq!(
+        payload["diagnostics"].as_array().unwrap().len(),
+        0,
+        "{stdout}"
+    );
+}
+
+#[test]
 fn check_defaults_to_current_directory_and_reports_error_prone() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = tmp.path().join("cache");

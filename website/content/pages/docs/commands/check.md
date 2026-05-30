@@ -43,7 +43,9 @@ Use `check` immediately after editing Java. It catches compiler, lint, and Error
 
 ## Agent notes
 
-Keep the checked path narrow while repairing, then widen to `src test` before reporting. Do not scrape human diagnostics when `--json` is available.
+Keep the checked path narrow while repairing, then widen to the full edited set before reporting. Do not scrape human diagnostics when `--json` is available.
+
+If a checked file declares `//SOURCES`, `jbx check` compiles those source files first and adds the resulting classes to the check classpath. You should not need to manually pass helper files just to make declared source references resolve.
 
 ## JSON and schema
 
