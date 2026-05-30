@@ -25,8 +25,10 @@ When the PR affects visible behavior:
 - [ ] If the PR adds, renames, removes, lists, or retrieves skills, the CLI behavior, embedded skill data, discovery stubs, README, and website examples all agree.
 - [ ] The review is generic across all bundled skills; do not hard-code assumptions that only a `jbx` skill can exist.
 
-### 4. Dedicated docs
+### 4. Dedicated docs and JSON schemas
 - [ ] Changes to `jbx docs`, JSON sidecars, or documentation schema update `docs/jbx-docs-schema.md` and website docs as needed.
+- [ ] Any command that emits JSON has a documented schema or stable shape on the website, and examples match the actual CLI flags.
+- [ ] If a command gains, loses, or changes `--json`, the README, website command page, bundled command skill, and schema page all agree.
 - [ ] Examples remain copy-pasteable and do not mention stale repository names, flags, or URLs.
 
 ## Automated Check

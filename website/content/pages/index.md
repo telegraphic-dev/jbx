@@ -1,35 +1,79 @@
 ---
-title: jbx — Java tools for agents
-description: Rust-native, JBang-compatible Java tooling for autonomous agents and impatient humans.
+title: jbx — All-in-One Java CLI
+description: Highly opinionated native command line utility for daily Java tasks: scripts, Maven artifacts, templates, JDKs, docs, formatting, tests, rewriting, ASTs, and publishing.
 ---
 
-# Java tools for agents.
+<section class="hero-panel">
 
-`jbx` is a Rust-native Java toolbox aiming for JBang compatibility first: script running, Maven tool execution, testing, formatting, publishing, cache management, and JDK handling behind one boringly reliable CLI.
+# All-in-One Java CLI
+
+The Java ecosystem is rich. So rich that one can get easily lost. `jbx` (pronounced "jay-box") is a highly opinionated native command line utility that provides everything required to use Java for daily tasks.
+
+<div class="install-switch" aria-label="Install jbx">
+  <div class="install-tabs" role="tablist" aria-label="Choose installation view">
+    <button type="button" role="tab" aria-selected="true" aria-controls="install-humans" id="tab-humans" data-install-tab="humans">For humans</button>
+    <span aria-hidden="true">|</span>
+    <button type="button" role="tab" aria-selected="false" aria-controls="install-agents" id="tab-agents" data-install-tab="agents">For agents</button>
+  </div>
+  <pre class="install-command" id="install-humans" role="tabpanel" aria-labelledby="tab-humans" data-install-panel="humans"><code>$ curl -fsSL https://jbx.telegraphic.dev/install.sh | bash</code></pre>
+  <pre class="install-command" id="install-agents" role="tabpanel" aria-labelledby="tab-agents" data-install-panel="agents" hidden><code>$ npx skills add telegraphic-dev/jbx</code></pre>
+</div>
+
+</section>
+
+<section class="split-cards">
+  <article class="card feature-card">
+    <h2>For humans</h2>
+    <p><code>jbx</code> executes JBang-style scripts and launches artifacts from Maven Central without turning a small task into a build-system archaeology dig.</p>
 
 ```bash
-jbx Hello.java world
-jbx dev.telegraphic:hello-tool:1.0.0 -- --help
-jbx docs com.fasterxml.jackson.core:jackson-databind --json
-jbx doctor Hello.java --json
+jbx hello.java
+jbx org.openapitools:openapi-generator-cli
 ```
+  </article>
 
-## Why it exists
+  <article class="card feature-card">
+    <h2>For agents</h2>
+    <p><code>jbx</code> provides the pieces agents need to write Java effectively and verify their work without guessing.</p>
 
-Agents do not need another clever Java wrapper. They need a tool that is scriptable, inspectable, deterministic, and fast enough to use repeatedly inside coding loops.
+```bash
+jbx skill list
+jbx skill get jbx-init
+jbx init -t hello hello.java
+jbx fmt hello.java
+jbx init -t test hello_test.java
+jbx test hello_test.java --coverage
+jbx hello.java
+```
+  </article>
+</section>
 
-- Run Java scripts and Maven executable tools from one command.
-- Resolve, fetch, test, format, diagnose, export, publish, and document Java projects.
-- Prefer structured output for automation, plain Markdown for reading, and reproducible behavior over magic.
-- Stay compatible with JBang where users already have muscle memory.
+## What `jbx` gives you
 
-## Agent-facing surfaces
+- templates
+- automatic JDK provisioning
+- dependency search and resolution
+- documentation in structured format
+- formatting and linting
+- deterministic rewriting and AST manipulation
+- artifact publication
 
-- [`/llms.txt`](/llms.txt) gives crawlers and agents the canonical short map.
-- [`/llms-full.txt`](/llms-full.txt) is the full Markdown corpus.
-- Every page is also served as Markdown beside the HTML version.
-- [`jbx docs`](/docs/agent-guide/) produces agent-readable Markdown and JSON sidecars for Java libraries.
+<section class="start-here">
 
-## Current status
+## Start here
 
-`jbx` is early and moving quickly. The intent is not novelty for novelty’s sake; first the boring parts become reliable, then the interesting parts earn their keep.
+<p>Continue to the <a href="/docs/">Documentation</a> for common use cases, or use <span class="nowrap"><a href="/docs/commands/">Commands</a> for the CLI reference</span>.</p>
+
+</section>
+
+## Acknowledgement
+
+`jbx` builds on the shoulders of giants:
+
+- [JBang](https://www.jbang.dev/) — Inspiration for Java scripting, directives, and the practical “run this Java file now” workflow.
+- [JUnit](https://junit.org/junit5/) — the standard testing platform for modern Java.
+- [JaCoCo](https://www.jacoco.org/jacoco/) — Java code coverage reports for test runs.
+- [Palantir Java Format](https://github.com/palantir/palantir-java-format) — deterministic Java formatting.
+- [Error Prone](https://errorprone.info/) — compile-time bug detection for Java.
+- [OpenRewrite](https://docs.openrewrite.org/) — automated source rewriting and recipe-driven code modernization.
+- [JavaParser](https://javaparser.org/) — Java AST parsing and serialization for structured source manipulation.

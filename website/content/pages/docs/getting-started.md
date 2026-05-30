@@ -14,7 +14,7 @@ curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
 export PATH="$HOME/.jbx/bin:$PATH"
 ```
 
-The installer downloads a native Linux or macOS binary. Rust is only needed when building `jbx` from source.
+The installer downloads a native Linux or macOS binary. Source builds are only needed when contributing to `jbx` itself.
 
 ```bash
 jbx run Hello.java world
@@ -96,7 +96,7 @@ jbx rewrite recipes yaml --search format --detail --json
 
 ## Publishing metadata
 
-`jbx publish --file jbx.json --dry-run` stages Maven-ready artifacts before any real release. Keep the descriptor lean: use `dependencies` (or `//DEPS` in a script) for libraries needed to compile the artifact, and `runtimeDependencies` (or `//RUNTIME`) for runtime-only implementations such as logging backends or recipe helper providers.
+`jbx publish --file jbx.json --dry-run` stages Maven-ready artifacts before any real release. Keep the descriptor lean: use `dependencies` (or `//DEPS` in a script) for libraries needed to compile the artifact, and `runtimeDependencies` (or `//RUNTIME`) for runtime-only libraries such as logging backends or recipe helper providers. See the [`jbx.json` descriptor reference](/docs/jbx-json/) for the full field list and schema.
 
 ```json
 {

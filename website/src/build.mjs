@@ -9,8 +9,8 @@ const distDir = path.join(root, 'dist');
 const checkOnly = process.argv.includes('--check');
 const site = {
   origin: 'https://jbx.telegraphic.dev',
-  title: 'jbx — Java tools for agents',
-  description: 'A Rust-native, JBang-compatible Java toolbox built for autonomous agents and impatient humans.'
+  title: 'jbx — All-in-One Java CLI',
+  description: 'Highly opinionated native command line utility for daily Java tasks: scripts, Maven artifacts, templates, JDKs, docs, formatting, tests, rewriting, ASTs, and publishing.'
 };
 
 function escapeHtml(value = '') {
@@ -71,7 +71,7 @@ function inline(md) {
         const hrefStart = textEnd + 2;
         const hrefEnd = matchingParen(md, hrefStart - 1);
         if (hrefEnd !== -1) {
-          out += `<a href="${escapeHtml(md.slice(hrefStart, hrefEnd))}">${escapeHtml(md.slice(i + 1, textEnd))}</a>`;
+          out += `<a href="${escapeHtml(md.slice(hrefStart, hrefEnd))}">${inline(md.slice(i + 1, textEnd))}</a>`;
           i = hrefEnd + 1;
           continue;
         }
@@ -83,14 +83,16 @@ function inline(md) {
   return out;
 }
 
-function markdownToHtml(markdown) {
+function markdownToHtml(markdown, { headingPrefix = '' } = {}) {
   const lines = markdown.split('\n');
   const html = [];
   let inCode = false;
   let codeLang = '';
   let code = [];
   let list = [];
+  let listTag = 'ul';
   let paragraph = [];
+  const seenHeadingIds = new Map();
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -99,8 +101,9 @@ function markdownToHtml(markdown) {
   };
   const flushList = () => {
     if (!list.length) return;
-    html.push(`<ul>${list.map(item => `<li>${inline(item)}</li>`).join('')}</ul>`);
+    html.push(`<${listTag}>${list.map(item => `<li>${inline(item)}</li>`).join('')}</${listTag}>`);
     list = [];
+    listTag = 'ul';
   };
   const flushCode = () => {
     html.push(`<pre><code class="language-${escapeHtml(codeLang)}">${escapeHtml(code.join('\n'))}</code></pre>`);
@@ -125,11 +128,29 @@ function markdownToHtml(markdown) {
       flushParagraph(); flushList();
       const level = heading[1].length;
       const text = heading[2].trim();
-      html.push(`<h${level} id="${slugify(text)}">${inline(text)}</h${level}>`);
+      const baseId = headingPrefix + slugify(text);
+      const seen = seenHeadingIds.get(baseId) || 0;
+      seenHeadingIds.set(baseId, seen + 1);
+      const id = seen === 0 ? baseId : `${baseId}-${seen + 1}`;
+      html.push(`<h${level} id="${escapeHtml(id)}">${inline(text)}</h${level}>`);
       continue;
     }
     const bullet = line.match(/^[-*]\s+(.+)$/);
-    if (bullet) { flushParagraph(); list.push(bullet[1]); continue; }
+    if (bullet) {
+      flushParagraph();
+      if (listTag !== 'ul') flushList();
+      listTag = 'ul';
+      list.push(bullet[1]);
+      continue;
+    }
+    const numbered = line.match(/^\d+[.)]\s+(.+)$/);
+    if (numbered) {
+      flushParagraph();
+      if (listTag !== 'ol') flushList();
+      listTag = 'ol';
+      list.push(numbered[1]);
+      continue;
+    }
     flushList();
     paragraph.push(line.trim());
   }
@@ -141,13 +162,41 @@ function markdownToHtml(markdown) {
 const nav = [
   ['/', 'Home'],
   ['/docs/', 'Docs'],
-  ['/brand/', 'Brand'],
-  ['/llms.txt', 'llms.txt']
+  ['/docs/commands/', 'Commands']
+];
+
+const commandDocs = [
+  ['alias', 'alias'],
+  ['app', 'app'],
+  ['build', 'build'],
+  ['cache', 'cache'],
+  ['catalog', 'catalog'],
+  ['check', 'check'],
+  ['docs', 'docs'],
+  ['doctor', 'doctor'],
+  ['export', 'export'],
+  ['fetch', 'fetch'],
+  ['fmt', 'fmt'],
+  ['graph', 'graph'],
+  ['info', 'info'],
+  ['init', 'init'],
+  ['install', 'install'],
+  ['jbx', 'top-level'],
+  ['jdk', 'jdk'],
+  ['publish', 'publish'],
+  ['resolve', 'resolve'],
+  ['rewrite', 'rewrite'],
+  ['run', 'run'],
+  ['search', 'search'],
+  ['skill', 'skill'],
+  ['template', 'template'],
+  ['test', 'test'],
+  ['trust', 'trust']
 ];
 
 function shell({ title, description, body, route, rawPath }) {
   const canonical = `${site.origin}${route === '/' ? '/' : route}`;
-  const mdLink = rawPath ? `<a href="${rawPath}">Markdown</a>` : '';
+  const mdLink = rawPath ? `<a class="footer-resource footer-markdown" href="${escapeHtml(rawPath)}" aria-label="Markdown"><span class="footer-icon" aria-hidden="true">MD</span><span class="footer-label">Markdown</span></a>` : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -156,6 +205,7 @@ function shell({ title, description, body, route, rawPath }) {
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description || site.description)}">
 <link rel="canonical" href="${canonical}">
+${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.origin + rawPath)}">` : ''}
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description || site.description)}">
 <meta property="og:image" content="${site.origin}/assets/social-card.png">
@@ -166,17 +216,36 @@ function shell({ title, description, body, route, rawPath }) {
 <body>
 <header class="site-header">
   <a class="mark" href="/"><img src="/assets/jbx-toolbox-logo-256.png" alt="jbx toolbox logo"><span>jbx</span></a>
-  <nav>${nav.map(([href, label]) => `<a href="${href}"${route === href ? ' aria-current="page"' : ''}>${label}</a>`).join('')}<button class="theme-toggle" type="button" aria-label="Toggle light and dark theme">Theme</button></nav>
+  <button class="menu-toggle" type="button" aria-controls="site-nav" aria-expanded="false">Menu</button>
+  <nav id="site-nav" class="site-nav">${nav.map(([href, label]) => {
+    const active = route === href || (href === '/docs/' && route.startsWith('/docs/') && !route.startsWith('/docs/commands/')) || (href === '/docs/commands/' && route.startsWith('/docs/commands/'));
+    return `<a href="${href}"${active ? ' aria-current="page"' : ''}>${label}</a>`;
+  }).join('')}<button class="theme-toggle" type="button" aria-label="Toggle light and dark theme">Theme</button></nav>
 </header>
 <main>${body}</main>
 <footer>
-  <span>jbx by Telegraphic</span>
-  <span>${mdLink}<a href="https://github.com/telegraphic-dev/jbx">GitHub</a><a href="/llms-full.txt">llms-full.txt</a></span>
+  <span>jbx by <a href="https://telegraphic.dev">telegraphic.dev</a></span>
+  <span>${mdLink}<a class="footer-resource footer-github" href="https://github.com/telegraphic-dev/jbx" aria-label="GitHub"><svg class="footer-icon" aria-hidden="true" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.67 0 8.19c0 3.62 2.29 6.68 5.47 7.76.4.08.55-.18.55-.4 0-.2-.01-.86-.01-1.56-2.01.38-2.53-.5-2.69-.95-.09-.23-.48-.95-.82-1.14-.28-.16-.68-.55-.01-.56.63-.01 1.08.59 1.23.83.72 1.24 1.87.89 2.33.68.07-.53.28-.89.51-1.09-1.78-.21-3.64-.91-3.64-4.04 0-.89.31-1.62.82-2.19-.08-.21-.36-1.04.08-2.16 0 0 .67-.22 2.2.84A7.42 7.42 0 0 1 8 3.94c.68 0 1.36.09 2 .27 1.53-1.06 2.2-.84 2.2-.84.44 1.12.16 1.95.08 2.16.51.57.82 1.3.82 2.19 0 3.14-1.87 3.83-3.65 4.04.29.25.54.75.54 1.52 0 1.09-.01 1.97-.01 2.24 0 .22.15.48.55.4A8.11 8.11 0 0 0 16 8.19C16 3.67 12.42 0 8 0Z"/></svg><span class="footer-label">GitHub</span></a></span>
 </footer>
 <script>
 (() => {
   const key = 'jbx-theme';
   const button = document.querySelector('.theme-toggle');
+  const menuButton = document.querySelector('.menu-toggle');
+  const siteNav = document.querySelector('.site-nav');
+  const mobileQuery = matchMedia('(max-width: 760px)');
+  const closeMobileNav = () => {
+    siteNav?.removeAttribute('data-open');
+    menuButton?.setAttribute('aria-expanded', 'false');
+  };
+  menuButton?.addEventListener('click', () => {
+    const open = siteNav?.getAttribute('data-open') === 'true';
+    if (open) siteNav?.removeAttribute('data-open');
+    else siteNav?.setAttribute('data-open', 'true');
+    menuButton.setAttribute('aria-expanded', String(!open));
+  });
+  mobileQuery.addEventListener?.('change', closeMobileNav);
+  if (!mobileQuery.matches) closeMobileNav();
   const preferred = () => matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   const apply = theme => {
     document.documentElement.dataset.theme = theme;
@@ -188,6 +257,37 @@ function shell({ title, description, body, route, rawPath }) {
     localStorage.setItem(key, next);
     apply(next);
   });
+  const installTabs = [...document.querySelectorAll('[data-install-tab]')];
+  const installPanels = [...document.querySelectorAll('[data-install-panel]')];
+  const showInstallPanel = name => {
+    for (const tab of installTabs) {
+      tab.setAttribute('aria-selected', tab.dataset.installTab === name ? 'true' : 'false');
+    }
+    for (const panel of installPanels) {
+      panel.hidden = panel.dataset.installPanel !== name;
+    }
+  };
+  for (const tab of installTabs) {
+    tab.addEventListener('click', () => showInstallPanel(tab.dataset.installTab));
+  }
+  const commandSearch = document.querySelector('[data-command-search]');
+  const commandLinks = [...document.querySelectorAll('[data-command-link]')];
+  const tocDetails = document.querySelector('.toc-details');
+  const syncTocDetails = () => {
+    if (!tocDetails) return;
+    tocDetails.open = !mobileQuery.matches;
+  };
+  syncTocDetails();
+  mobileQuery.addEventListener?.('change', syncTocDetails);
+  const filterCommands = () => {
+    const query = commandSearch?.value.trim().toLowerCase() || '';
+    for (const link of commandLinks) {
+      const haystack = (link.textContent + ' ' + link.getAttribute('href')).toLowerCase();
+      link.style.display = query && !haystack.includes(query) ? 'none' : '';
+    }
+  };
+  commandSearch?.addEventListener('input', filterCommands);
+  filterCommands();
 })();
 </script>
 </body>
@@ -224,6 +324,17 @@ function routeFor(file) {
   return `/${rel}/`;
 }
 
+function commandPageBody(markdown, route) {
+  const currentFile = route === '/docs/commands/' ? null : route.replace(/^\/docs\/commands\//, '').replace(/\/$/, '');
+  const tocLinks = commandDocs.map(([label, fileName]) => {
+    const href = `/docs/commands/${fileName}/`;
+    const current = fileName === currentFile;
+    return `<a href="${href}" data-command-link${current ? ' aria-current="page"' : ''}>${label}</a>`;
+  }).join('');
+  const toc = `<aside class="toc" aria-label="Command table of contents"><details class="toc-details" open><summary>Commands</summary><label class="toc-search"><span>Search commands</span><input type="search" placeholder="search…" autocomplete="off" data-command-search></label><div class="toc-links">${tocLinks}</div></details></aside>`;
+  return `<div class="docs-with-toc">${toc}<article class="page commands-reference">${markdownToHtml(markdown)}</article></div>`;
+}
+
 async function build() {
   if (!checkOnly) await fs.rm(distDir, { recursive: true, force: true });
   if (!checkOnly) await fs.mkdir(distDir, { recursive: true });
@@ -235,24 +346,27 @@ async function build() {
     const [meta, md] = parseFrontmatter(raw);
     const route = routeFor(file);
     const rawPath = route === '/' ? '/index.md' : `${route.replace(/\/$/, '')}.md`;
-    const html = markdownToHtml(md);
+    const pageMarkdown = md;
+    const html = markdownToHtml(pageMarkdown);
     const heroLogo = route === '/' ? '<img class="hero-logo" src="/assets/jbx-toolbox-logo.png" alt="jbx blue toolbox logo">' : '';
-    const body = `<article class="page ${meta.layout || ''}">${heroLogo}${html}</article>`;
+    const body = route.startsWith('/docs/commands/')
+      ? commandPageBody(pageMarkdown, route)
+      : `<article class="page ${meta.layout || ''}">${heroLogo}${html}</article>`;
     const document = shell({ title: meta.title || site.title, description: meta.description, body, route, rawPath });
-    pages.push({ route, rawPath, title: meta.title || site.title, description: meta.description || site.description, md });
-    fullTexts.push(`# ${meta.title || route}\n\nSource: ${site.origin}${rawPath}\n\n${md.trim()}\n`);
+    pages.push({ route, rawPath, title: meta.title || site.title, description: meta.description || site.description, md: pageMarkdown });
+    fullTexts.push(`# ${meta.title || route}\n\nSource: ${site.origin}${rawPath}\n\n${pageMarkdown.trim()}\n`);
     if (!checkOnly) {
       const dir = path.join(distDir, route === '/' ? '' : route);
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(path.join(dir, 'index.html'), document);
       await fs.mkdir(path.dirname(path.join(distDir, rawPath)), { recursive: true });
-      await fs.writeFile(path.join(distDir, rawPath), md.trim() + '\n');
+      await fs.writeFile(path.join(distDir, rawPath), pageMarkdown.trim() + '\n');
     }
   }
-  const llms = `# jbx\n\n> ${site.description}\n\n## Canonical URLs\n\n- Website: ${site.origin}/\n- GitHub: https://github.com/telegraphic-dev/jbx\n- Agent guide: ${site.origin}/docs/agent-guide/\n- Markdown corpus: ${site.origin}/llms-full.txt\n\n## Pages\n\n${pages.map(p => `- [${p.title}](${site.origin}${p.rawPath}): ${p.description}`).join('\n')}\n`;
+  const llms = `# jbx\n\n> ${site.description}\n\n## Canonical URLs\n\n- Website: ${site.origin}/\n- GitHub: https://github.com/telegraphic-dev/jbx\n- Docs: ${site.origin}/docs/\n\n## Pages\n\n${pages.map(p => `- [${p.title}](${site.origin}${p.rawPath}): ${p.description}`).join('\n')}\n`;
   const llmsFull = `${llms}\n---\n\n${fullTexts.join('\n---\n\n')}`;
   const robots = `User-agent: *\nAllow: /\n\nSitemap: ${site.origin}/sitemap.xml\n`;
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${pages.map(p => `  <url><loc>${site.origin}${p.route === '/' ? '/' : p.route}</loc></url>`).join('\n')}\n  <url><loc>${site.origin}/llms.txt</loc></url>\n  <url><loc>${site.origin}/llms-full.txt</loc></url>\n</urlset>\n`;
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${pages.map(p => `  <url><loc>${site.origin}${p.route === '/' ? '/' : p.route}</loc></url>`).join('\n')}\n</urlset>\n`;
   if (!checkOnly) {
     await fs.writeFile(path.join(distDir, 'llms.txt'), llms);
     await fs.writeFile(path.join(distDir, 'llms-full.txt'), llmsFull);

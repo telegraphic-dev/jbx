@@ -1,6 +1,6 @@
 # jbx
 
-`jbx` is a Rust-native Java toolbox: JBang-compatible script running, Maven tool execution, testing, formatting, publishing, cache management, and JDK handling behind one CLI.
+`jbx` is the single agent-friendly entry point to the Java ecosystem: Java script running, Maven tool execution, testing, formatting, publishing, cache management, documentation, diagnostics, and JDK handling behind one CLI.
 
 ```bash
 curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
@@ -52,7 +52,7 @@ Implemented now:
 - `jbx publish [script.java] --file jbx.json --publish` signs the artifacts, uploads the bundle through the Maven Central Portal API, and waits for publication
 - `jbx publish [script.java] --file jbx.json --serve <port>` serves the prepared artifact from a local Maven-compatible HTTP repository
 - `jbx install [script.java] --file jbx.json [--destination repo]` installs the artifact into a Maven repository layout; default destination is `~/.m2/repository`
-- `jbx skill list` lists version-matched agent skills bundled with this jbx release
+- `jbx skill list [--json]` lists version-matched agent skills bundled with this jbx release, including command-specific skills such as `jbx-check`
 - `jbx skill get [name]` prints a bundled agent skill; defaults to the main `jbx` skill
 - `jbx docs <GAV|source|dir> [--json]` prints agent-friendly documentation; remote `group:artifact` resolves the latest release before fetching sidecars, remote GAV sidecars are cached, local sources are generated fresh
 - `jbx info classpath <script.java>`
@@ -87,7 +87,7 @@ Implemented now:
   - `//NOINTEGRATIONS`
 - compile/run cache under the OS cache directory
 - `jbx build` compiles scripts into cache without running them
-- `jbx init` creates Java 25+ unnamed-class scripts from built-in or imported catalog templates (`hello`/`java`, `compact`, `cli`, `agent`, plus catalog `templates` entries), supports `--deps`, `--java`, `--template`, and `--force`
+- `jbx init` creates Java 25+ unnamed-class scripts from built-in or imported catalog templates (`hello`/`java`, `compact`, `cli`, `agent`, `test`, plus catalog `templates` entries), supports `--deps`, `--java`, `--template`, and `--force`
 - `jbx template list` lists built-in and imported catalog init templates and supports `--json`
 - `jbx cache clear` clears the compiled-script cache
 - `jbx cache path` prints the effective compiled-script cache directory
@@ -115,7 +115,7 @@ Implemented now:
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
 - `jbx publish --serve <port>` prepares the same Maven repository layout unsigned and serves it from `http://127.0.0.1:<port>/`; port `0` asks the OS to choose a free port; it also serves artifact-level `maven-metadata.xml` plus checksums so version-less Maven lookups work
 - `jbx install` installs the current project into `~/.m2/repository` by default or another Maven-layout repository with `--destination` / `--to`; it updates `maven-metadata-local.xml` for the installed artifact
-- `jbx skill list` and `jbx skill get [name]` expose version-matched agent guidance bundled with the binary from editable `skill-data/` files
+- `jbx skill list [--json]` and `jbx skill get [name]` expose version-matched agent guidance bundled with the binary. The main skill and command skills are rendered from website command Markdown in `website/content/pages/docs/commands/`; derived static copies live in `skill-data/` and installable `skills/`, with command skills named `jbx-<command>`.
 - `jbx docs <source|dir>` generates Markdown docs from local Java sources without writing cache entries
 - `jbx docs <group:artifact>` resolves the latest Maven release metadata before fetching `artifact-version-jbx-docs.md`
 - `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace; see [`docs/jbx-docs-schema.md`](docs/jbx-docs-schema.md) for the JSON shape
@@ -221,6 +221,22 @@ Use `--version` when release/tag workflows need to publish a different version t
 Use `dependencies` / `//DEPS` for dependencies needed to compile the published artifact. Use `runtimeDependencies` / `//RUNTIME` for runtime-only implementations that should appear in generated Maven metadata with `runtime` scope without being required on the compile classpath.
 
 For GitHub-hosted repositories, `jbx publish` can prefill Maven Central POM `url`, `licenses`, `developers`, and `scm` metadata from the `origin` remote plus `gh repo view` when those fields are omitted. Put the fields in `jbx.json` when you want explicit release metadata instead of GitHub-derived defaults. Signed Central-ready bundles require a configured GPG key; `--skip-signing` is only for local inspection. Real Portal publishing requires a generated Maven Central user token supplied via environment variables only: preferably `CENTRAL_TOKEN_USERNAME` / `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` containing the base64-encoded `username:password` value expected by the Portal API.
+
+A real multi-artifact release setup looks like `telegraphic-dev/jbx-utils`: each helper (`jbx-check`, `jbx-graph`, `jbx-rewrite`) has its own `jbx.json`, PR CI runs a script around `jbx publish --dry-run --skip-signing`, and the release workflow publishes with a matrix only after a GitHub release or manual dispatch. The publish workflow imports `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`, sets `CENTRAL_TOKEN_USERNAME`/`CENTRAL_TOKEN_PASSWORD`, derives the version from `workflow_dispatch` input or `GITHUB_REF_NAME#v`, then runs:
+
+```bash
+jbx publish \
+  --publish \
+  --file "${PROJECT}/jbx.json" \
+  --version "$VERSION" \
+  --output "target/${PROJECT}-central-bundle.zip" \
+  --target-dir "target/publish/${PROJECT}" \
+  --cache-dir .jbx-cache
+```
+
+Keep `--publish` out of PR CI. Normal checks should prove the bundle shape; the release workflow should be the only place that talks to Maven Central.
+
+Full descriptor and GitHub Actions examples are in `docs/jbx-json.md` and `/docs/jbx-json/` on the website.
 
 ## Development
 

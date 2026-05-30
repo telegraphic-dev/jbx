@@ -1,25 +1,17 @@
 ---
 title: jbx docs
-description: Start points for humans and agents using jbx.
+description: Start points for using jbx.
 ---
 
 # Documentation
 
-This site keeps both human pages and agent-readable Markdown in the same repository as the CLI. That is deliberate: docs, website, brand, and implementation should drift together or not at all.
+Install steps, commands, examples, schemas, and automation patterns.
 
 ## Start here
 
-- [Getting started](/docs/getting-started/) covers the basic command shape.
-- [Agent guide](/docs/agent-guide/) explains the automation-friendly surfaces.
-- [Brand](/brand/) defines the visual system and logo usage.
+- [Getting started](/docs/getting-started/) covers install and first commands.
+- [Command reference](/docs/commands/) gives every command its own page.
+- [`jbx.json` descriptor](/docs/jbx-json/) explains project metadata for publish/install workflows.
+- [JSON schemas](/docs/schemas/) documents structured output contracts and descriptor schemas.
+- [Automation guide](/docs/agent-guide/) explains safe unattended usage patterns.
 
-## Markdown-first publishing
-
-Each route has a Markdown sibling:
-
-```text
-/docs/getting-started/     HTML page
-/docs/getting-started.md   Markdown source served to agents
-/llms.txt                  Short machine-readable index
-/llms-full.txt             Full machine-readable corpus
-```

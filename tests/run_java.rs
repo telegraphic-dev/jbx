@@ -49,6 +49,60 @@ class Hello {
 }
 
 #[test]
+fn top_level_java_shorthand_passes_dash_args_without_separator() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("Args.java");
+    fs::write(
+        &src,
+        r#"
+class Args {
+  public static void main(String[] args) {
+    System.out.println(String.join(",", args));
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = run_jbx(&[&src], &["--name", "jay"]);
+
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "--name,jay");
+}
+
+#[test]
+fn explicit_run_passes_dash_args_without_separator() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("Args.java");
+    fs::write(
+        &src,
+        r#"
+class Args {
+  public static void main(String[] args) {
+    System.out.println(String.join(",", args));
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = run_jbx(&[std::path::Path::new("run"), &src], &["--name", "jay"]);
+
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "--name,jay");
+}
+
+#[test]
 fn infers_main_class_from_package_declaration() {
     let tmp = tempfile::tempdir().unwrap();
     let src_dir = tmp.path().join("demo");

@@ -1,140 +1,118 @@
 ---
 name: jbx
-description: One-stop shop Java toolbox for agents and humans. Inspired by JBang, uv and zerolang.
+description: Use jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools.
 ---
 
-# jbx
+# `jbx`
 
-jbx is a Rust-native Java toolbox for agents and humans: JBang-compatible script running, Maven tool execution, testing, formatting, publishing, cache management, documentation sidecars, and JDK handling behind one CLI.
+Use `jbx` for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools.
 
-Use this skill when working in a repository that uses `jbx`, when authoring Java scripts intended to run with `jbx`, or when an agent needs deterministic Java tooling commands.
+The top-level command stays intentionally thin. It gives humans a fast run path and gives agents a discovery path; detailed behavior lives in dedicated subcommands and version-matched skills.
 
-## Install
+## Start here
 
-Install the current native release:
-
-```sh
-curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
-export PATH="$HOME/.jbx/bin:$PATH"
-jbx --version
+```bash
+jbx skill list
+jbx skill list --json
 ```
 
-In a jbx repository checkout, prefer the local binary so behavior matches the code under edit:
+## Common thin entry-point workflows
 
-```sh
-cargo run --locked -- --version
-cargo run --locked -- <command>
+```bash
+jbx Hello.java --name Jay --verbose
+jbx dev.telegraphic:hello-tool:1.0.0 --help
+jbx dev.telegraphic:hello-tool:1.0.0 -- --literal-double-dash
+jbx doctor --json
 ```
 
-## Common Entry Points
+## Passing arguments
 
-```sh
-jbx <GAV|script.java> [args...]
-jbx run <script.java> [args...]
-jbx build <script.java>
-jbx check [path...] [--json]
-jbx test [script.java|directory] [--coverage] [--jacoco-version version]
-jbx fmt [path...]
-jbx doctor [script.java|url] [--json] [--cache-dir dir] [--repo id=url] [--publish] [--native]
-jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
-jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
-jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json] [--rewrite-version version]
-jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json]
-jbx docs <GAV|source|dir> [--json]
-jbx search <text|group:artifact[:version]> [--json]
-jbx resolve <coordinates...>
-jbx resolve --classpath <coordinates...>
-jbx fetch <coordinates...>
-jbx export local <script.java|alias> [-o app.jar]
-jbx export portable <script.java|alias> [-o app.jar]
-jbx export native <script.java|alias> [-o app]
-jbx publish [script.java] --file jbx.json --dry-run --gpg-key <key-id>
-CENTRAL_TOKEN_USERNAME=... CENTRAL_TOKEN_PASSWORD=... jbx publish [script.java] --file jbx.json --publish --gpg-key <key-id>
-jbx install [script.java] --file jbx.json
-jbx jdk list
-jbx jdk home [version]
-jbx jdk install <version>
+For the top-level shorthand, `jbx` options go before the Java file or Maven coordinate. After the target, arguments belong to the launched program, including options such as `--help` or Picocli flags.
+
+Use an explicit `--` only when the launched program needs to receive a literal double-dash argument.
+
+## Command pages
+
+- [`run`](/docs/commands/run/) — Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
+- [`build`](/docs/commands/build/) — Compile a script into the jbx cache without running it.
+- [`check`](/docs/commands/check/) — Run javac `-Xlint:all` and Error Prone by default, optionally as structured diagnostics.
+- [`test`](/docs/commands/test/) — Run JUnit tests with the standalone console launcher; optionally collect JaCoCo coverage.
+- [`docs`](/docs/commands/docs/) — Generate Markdown or JSON documentation from local Java sources, directories, docs sidecars, or Maven artifacts.
+- [`doctor`](/docs/commands/doctor/) — Check JDK selection, Maven Central, cache writability, formatter fallback, remote trust, dependencies, update drift, and optional publish/native tools.
+- [`rewrite`](/docs/commands/rewrite/) — Preview or apply OpenRewrite recipes with jbx-managed dependencies and JDKs; discover modules and recipes.
+- [`search`](/docs/commands/search/) — Search Maven Central artifacts by text or coordinates, with filters.
+- [`resolve`](/docs/commands/resolve/) — Resolve Maven coordinates to dependency coordinates without running code.
+- [`fetch`](/docs/commands/fetch/) — Download artifacts and print classpath or dependency coordinates.
+- [`info`](/docs/commands/info/) — Print parsed directives and derived metadata from Java scripts.
+- [`cache`](/docs/commands/cache/) — Inspect or clear compiled-script cache paths and entries.
+- [`trust`](/docs/commands/trust/) — Pin, list, remove, or clear trusted hashes for remote scripts.
+- [`app`](/docs/commands/app/) — Install, list, or uninstall Java scripts as PATH commands.
+- [`alias`](/docs/commands/alias/) — Add, remove, and list aliases from nearby `jbang-catalog.json` files.
+- [`catalog`](/docs/commands/catalog/) — Add and list external catalogs in `jbang-catalog.json`.
+- [`template`](/docs/commands/template/) — List built-in and imported templates for `jbx init`.
+- [`init`](/docs/commands/init/) — Create Java sources from built-in or imported templates.
+- [`export`](/docs/commands/export/) — Export local, portable, or native runnable artifacts.
+- [`publish`](/docs/commands/publish/) — Publish Java projects to Maven repositories, including Maven Central.
+- [`install`](/docs/commands/install/) — Install the current project into a Maven repository layout, usually `~/.m2/repository`.
+- [`fmt`](/docs/commands/fmt/) — Format Java files with Palantir Java Format, including Java 25 compact scripts.
+- [`graph`](/docs/commands/graph/) — Dump JavaParser native AST JSON or import it back to Java source.
+- [`skill`](/docs/commands/skill/) — List and print version-matched bundled agent skills.
+- [`jdk`](/docs/commands/jdk/) — List, install, and locate JDKs used by jbx.
+
+## Agent notes
+
+- Use `jbx skill list --json` for discovery.
+- Fetch the command-specific skill before running non-trivial commands.
+- Prefer explicit subcommands over relying on top-level shorthand in automation.
+- Treat top-level script/tool execution as code execution; inspect before running unknown inputs.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx`
+
+```text
+jbx: one-stop Java toolbox for scripts, tools, and agents
+
+Usage: jbx [OPTIONS] [SCRIPT] [ARGS]... [COMMAND]
+
+Commands:
+  run       Compile and run a Java source file
+  build     Compile and store script in the cache without running it
+  publish   Prepare Maven Central publishing artifacts
+  install   Install the current project into a Maven repository layout
+  docs      Print agent-friendly documentation for source, directories, or Maven artifacts
+  check     Check Java source files with javac diagnostics and Error Prone by default
+  init      Initialize a Java script
+  cache     Manage compiled script cache
+  trust     Manage trusted remote scripts
+  info      Print parsed JBang directives
+  doctor    Diagnose the local jbx toolchain and a script when provided
+  app       Manage scripts installed as commands on PATH
+  alias     Manage aliases from jbang-catalog.json
+  catalog   Manage external catalogs from jbang-catalog.json
+  export    Export runnable JARs
+  template  List init templates
+  resolve   Resolve Maven dependencies without running
+  fetch     Fetch Maven dependency artifacts and print classpath
+  search    Search Maven Central for artifacts
+  test      Run JUnit tests with the standalone console launcher
+  fmt       Format Java source files with Palantir Java Format
+  graph     Convert Java source to/from JavaParser's native JSON serialization
+  rewrite   Run OpenRewrite recipes against Java source trees
+  skill     Print version-matched agent skills bundled with this jbx release
+  jdk       Manage installed JDKs
+  help      Print this message or the help of the given subcommand(s)
+
+Arguments:
+  [SCRIPT]   Script to run, or Maven coordinates to launch as a Java tool
+  [ARGS]...  Arguments passed to the script/tool when no subcommand is given
+
+Options:
+      --repo <REPOS>           Additional repository for Maven executable shorthand (id=url format or bare URL)
+      --cache-dir <CACHE_DIR>  Override dependency cache directory for Maven executable shorthand
+      --main <MAIN_CLASS>      Main class for Maven executable shorthand instead of java -jar
+  -h, --help                   Print help
+  -V, --version                Print version
 ```
-
-Use `--json` when another tool or agent needs stable machine-readable output. Run `jbx doctor --json` to diagnose JDK selection, Maven Central reachability, cache writability, formatter fallback, remote trust, dependency resolution/version drift, and optional publishing/native tools. With `jbx test --coverage --json`, the JSON includes a `coverage` object with JaCoCo exec/html/xml paths and aggregate counters.
-
-## Source Rewriting
-
-Use `jbx rewrite patch` before mutating sources. It resolves OpenRewrite with jbx-managed dependencies, scans the requested sources, and writes a preview patch to `rewrite/rewrite.patch` without editing files:
-
-```sh
-jbx rewrite patch --recipe auto-format --source src/main/java
-jbx rewrite patch --module yaml --recipe org.openrewrite.yaml.format.AutoFormat --source config
-jbx rewrite patch --recipe change-package --option old=com.old --option new=com.new --source src --json
-```
-
-Use `jbx rewrite apply` only after inspecting the patch or when the task explicitly asks for mutation:
-
-```sh
-jbx rewrite apply --recipe cleanup --source src/main/java
-jbx rewrite apply --module org.openrewrite.recipe:rewrite-migrate-java:RELEASE --recipe org.openrewrite.java.migrate.UpgradeToJava21 --source src
-```
-
-Run-mode options: `--option key=value` passes recipe options, `--report dir` changes where `rewrite.patch` is written, `--json` prints a machine-readable summary, `--fail-on-changes` exits 2 when a recipe would change files, `--no-fail-on-invalid-recipes` continues past invalid active recipes, `--cache-dir dir` changes the helper/dependency cache, `--repo id=url` adds recipe repositories, and `--rewrite-version version` pins the OpenRewrite version used for built-in modules.
-
-Useful discovery commands:
-
-```sh
-jbx rewrite modules --search yaml --group org.openrewrite --rewrite-version 8.60.0 --json
-jbx rewrite recipes yaml --search format --detail --json
-```
-
-Known recipe aliases include `auto-format`, `format`, `cleanup`, `remove-unused-imports`, and `change-package`. Known module aliases are `java`, `java-21`, `xml`, `yaml`, `properties`, `json`, `maven`, `gradle`, `groovy`, `kotlin`, `protobuf`, and `hcl`. Java recipe support is built in; extra modules are resolved only when supplied with `--module`.
-
-## Publishing Dependency Scopes
-
-When publishing, keep compile-time dependencies in `dependencies` in `jbx.json` or `//DEPS` directives. Put runtime-only implementations in `runtimeDependencies` or `//RUNTIME`; `jbx publish` writes them to generated Maven metadata with `runtime` scope without requiring them on the compile classpath.
-
-```json
-{
-  "dependencies": ["info.picocli:picocli:4.7.7"],
-  "runtimeDependencies": ["org.slf4j:slf4j-nop:2.0.17"]
-}
-```
-
-Always run `jbx publish --dry-run` and inspect the staged POM before publishing for real.
-
-Publishing requires signing plus Maven Central Portal credentials. Use `--gpg-key <key-id>` for signed Central-ready bundles. Supply either `CENTRAL_TOKEN_USERNAME` plus `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` as `base64(username:password)`. Use `--skip-signing` only for local inspection, not real publishing.
-
-## Agent Workflow
-
-Before editing, checking, testing, or repairing Java code with jbx:
-
-1. Prefer the repository-local `jbx` binary when inside the jbx checkout.
-2. Inspect the relevant source/script and nearby `jbx.json`, `jbang-catalog.json`, or `.jbang/jbang-catalog.json` metadata.
-3. Use the tightest command first (`jbx check`, `jbx test`, `jbx docs`, or a focused `cargo test` in the jbx repo).
-4. For behavior changes in jbx itself, add or update Rust integration tests before changing implementation.
-5. Run the repo's full required gate before reporting work as done.
-
-## jbx Repository Development Gate
-
-When changing jbx itself, run:
-
-```sh
-source ~/.cargo/env 2>/dev/null || true
-cargo fmt --check
-cargo test --locked
-cargo clippy --all-targets --all-features -- -D warnings
-RUSTFLAGS="-D warnings" cargo test --locked
-```
-
-For docs-only or website-facing changes, run the docs/website gate:
-
-```sh
-scripts/check-docs-website.sh
-git diff --stat
-git status --short
-```
-
-## Compatibility Notes
-
-- Treat upstream JBang behavior and docs as the compatibility spec unless jbx deliberately documents a difference.
-- Preserve Java 25 compact/unnamed-class behavior unless a test proves otherwise.
-- Prefer clear deterministic errors over silent partial compatibility.
-- Keep agent-facing output parseable; use JSON modes for automation.
-- Do not require Coursier or JBang at runtime when jbx has native Rust logic for the path.
