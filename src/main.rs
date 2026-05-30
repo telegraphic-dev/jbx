@@ -6682,21 +6682,48 @@ fn zip_directory(source_dir: &Path, output: &Path) -> Result<()> {
 
 const DEFAULT_JUNIT_PLATFORM_VERSION: &str = "6.1.0";
 
-fn collect_check_directives(files: &[PathBuf]) -> Result<jbx::Directives> {
+#[derive(Debug)]
+struct CheckInputs {
+    directives: jbx::Directives,
+    declared_sources: Vec<PathBuf>,
+}
+
+fn collect_check_directives(files: &[PathBuf]) -> Result<CheckInputs> {
     let mut directives = jbx::Directives::default();
-    for file in files {
-        let source = fs::read_to_string(file)
-            .with_context(|| format!("failed to read Java source {}", file.display()))?;
+    let mut declared_sources = Vec::new();
+    let mut visited = BTreeSet::new();
+    let mut queue: Vec<PathBuf> = files.to_vec();
+    while let Some(file) = queue.pop() {
+        let canonical_file = file
+            .canonicalize()
+            .with_context(|| format!("failed to resolve Java source {}", file.display()))?;
+        if !visited.insert(canonical_file.clone()) {
+            continue;
+        }
+        let source = fs::read_to_string(&canonical_file)
+            .with_context(|| format!("failed to read Java source {}", canonical_file.display()))?;
         let parsed = jbx::parse_directives(&source);
+        let base_dir = canonical_file.parent().unwrap_or_else(|| Path::new("."));
+        for source in &parsed.sources {
+            let source_path = base_dir.join(source);
+            declared_sources.push(source_path.clone());
+            queue.push(source_path);
+        }
         directives.deps.extend(parsed.deps);
         directives.repos.extend(parsed.repos);
+        directives.sources.extend(parsed.sources);
         directives.javac_options.extend(parsed.javac_options);
         if directives.java_version.is_none() {
             directives.java_version = parsed.java_version;
         }
         directives.enable_preview |= parsed.enable_preview;
     }
-    Ok(directives)
+    declared_sources.sort();
+    declared_sources.dedup();
+    Ok(CheckInputs {
+        directives,
+        declared_sources,
+    })
 }
 
 fn has_source_or_release_option(options: &[String]) -> bool {
@@ -6710,7 +6737,7 @@ fn has_source_or_release_option(options: &[String]) -> bool {
 }
 
 fn run_check(cmd: CheckCommand) -> Result<i32> {
-    let files = collect_java_files(&cmd.paths)?;
+    let mut files = collect_java_files(&cmd.paths)?;
     if files.is_empty() {
         if cmd.json {
             println!(
@@ -6726,7 +6753,8 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         return Ok(0);
     }
 
-    let mut directives = collect_check_directives(&files)?;
+    let inputs = collect_check_directives(&files)?;
+    let mut directives = inputs.directives;
     directives.deps.extend(split_cli_words(&cmd.deps));
     directives.repos.extend(split_cli_words(&cmd.repos));
     directives.javac_options.extend(cmd.javac_options);
@@ -6738,6 +6766,21 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     let java = jbx::jdk::java_bin_path(&jdk_root);
     let root = cache_root(cmd.cache_dir.as_deref())?.join("check");
 
+    let binary_deps = directives.deps;
+    files.extend(inputs.declared_sources);
+    files.sort();
+    files.dedup();
+
+    let repos = maven_tool::maven_repositories(&directives.repos);
+    let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
+    let mut classpath = cmd.classpath;
+    if !binary_deps.is_empty() {
+        classpath.extend(jbx::resolver::resolve_classpath(
+            &binary_deps,
+            &repos,
+            &cache_dir,
+        )?);
+    }
     let mut compiler_options = vec!["-Xlint:all".to_string(), "-proc:none".to_string()];
     let classes_dir = root.join("classes");
     if classes_dir.exists() {
@@ -6747,17 +6790,6 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     compiler_options.push("-d".to_string());
     compiler_options.push(classes_dir.to_string_lossy().to_string());
 
-    let dep_coordinates = directives.deps;
-    let mut classpath = cmd.classpath;
-    if !dep_coordinates.is_empty() {
-        let repos = maven_tool::maven_repositories(&directives.repos);
-        let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
-        classpath.extend(jbx::resolver::resolve_classpath(
-            &dep_coordinates,
-            &repos,
-            &cache_dir,
-        )?);
-    }
     if !classpath.is_empty() {
         compiler_options.push("-classpath".to_string());
         compiler_options.push(
@@ -6787,8 +6819,6 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         compiler_options.push("-Werror".to_string());
     }
 
-    let repos = maven_tool::maven_repositories(&directives.repos);
-    let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
     let mut wrapper_classpath = jbx::resolver::resolve_classpath(
         &[JBX_CHECK_COMPILER_COORDINATE.to_string()],
         &repos,
@@ -6952,7 +6982,7 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
     directive_files.extend(extra_sources.iter().map(|source| base_dir.join(source)));
-    let source_directives = collect_check_directives(&directive_files)?;
+    let source_directives = collect_check_directives(&directive_files)?.directives;
 
     let mut deps = source_directives.deps;
     deps.extend(split_cli_words(&cmd.deps));

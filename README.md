@@ -18,7 +18,7 @@ Implemented now:
 
 - `jbx run <script.java> [args...]`
 - `jbx build <script.java>`
-- `jbx check [path...]` checks Java source files/directories with javac `-Xlint:all` and Error Prone by default
+- `jbx check [path...]` checks Java source files/directories with javac `-Xlint:all` and Error Prone by default; checked files include companion sources declared with `//SOURCES`
 - `jbx init <script.java>` built-in Java template generation
 - `jbx template list [--json]` list built-in and imported catalog init templates
 - `jbx cache clear`
