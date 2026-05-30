@@ -204,7 +204,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - uses: dtolnay/rust-toolchain@stable
       - name: Install jbx
         run: cargo install --git https://github.com/telegraphic-dev/jbx.git --locked jbx
@@ -212,7 +212,7 @@ jobs:
         run: scripts/verify-publish-bundle.sh
 ```
 
-Then keep real Maven Central uploads in a separate release/manual workflow. The workflow needs these GitHub secrets: `CENTRAL_TOKEN_USERNAME`, `CENTRAL_TOKEN_PASSWORD`, `GPG_PRIVATE_KEY`, and `GPG_PASSPHRASE`.
+Then keep real Maven Central uploads in a separate release/manual workflow. The workflow needs these GitHub secrets: `CENTRAL_TOKEN_USERNAME`, `CENTRAL_TOKEN_PASSWORD`, `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`, and `GPG_KEY_ID`.
 
 ```yaml
 name: Publish to Maven Central
@@ -232,25 +232,21 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        project: [jbx-check, jbx-graph, jbx-rewrite]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - uses: dtolnay/rust-toolchain@stable
       - name: Install jbx
         run: cargo install --git https://github.com/telegraphic-dev/jbx.git --locked jbx
-      - name: Import GPG key
+      - name: Import GPG signing key
         uses: crazy-max/ghaction-import-gpg@v6
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
-      - name: Publish ${{ matrix.project }}
+      - name: Publish
         env:
           CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
           CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
@@ -261,17 +257,18 @@ jobs:
           fi
           jbx publish \
             --publish \
-            --file "${{ matrix.project }}/jbx.json" \
+            --file jbx.json \
             --version "$VERSION" \
-            --output "target/${{ matrix.project }}-central-bundle.zip" \
-            --target-dir "target/publish/${{ matrix.project }}" \
+            --gpg-key "${{ secrets.GPG_KEY_ID }}" \
+            --output target/central-bundle.zip \
+            --target-dir target/publish \
             --cache-dir .jbx-cache
 ```
 
 Two details matter:
 
 - The PR workflow runs `--dry-run --skip-signing` through a script so contributors can verify jars, POMs, sources, javadocs, docs sidecars, and bundle layout without secrets.
-- Only the release/manual workflow runs `--publish`; publishing from ordinary PR CI would be reckless and noisy.
+- Only the release/manual workflow imports the signing key and runs `--publish`; publishing from ordinary PR CI would be reckless and noisy.
 
 ## Descriptor and directives
 
