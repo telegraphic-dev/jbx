@@ -134,12 +134,6 @@ Qualified names are the default:
 - `returnType`, `type`, `throws`, `extends`, and `implements` should use qualified names following the naming rule above.
 - Keep raw signature strings out of the primary schema. They may be included as optional display-only `declaration` fields, but tools should rely on structured fields.
 
-## Current generator status
+## Validation expectation
 
-The initial `jbx docs` implementation can:
-
-- generate local docs from JBang-style source directives;
-- fetch and cache remote sidecars;
-- publish sidecar artifacts.
-
-It does not yet convert arbitrary Javadoc/JAR APIs into full `types`/member JSON. That should be a separate generator step, because doing it correctly needs real Java API extraction rather than regex over source text.
+Treat this page as the public contract for `jbx docs --json`. If a release changes the JSON shape, update this page in the same pull request and include an example payload that validates against the documented fields.
