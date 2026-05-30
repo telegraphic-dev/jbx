@@ -387,7 +387,7 @@ async function build() {
     const body = route.startsWith('/docs/commands/')
       ? commandPageBody(pageMarkdown, route)
       : `<article class="page ${meta.layout || ''}">${heroLogo}${html}</article>`;
-    const unlisted = meta.unlisted === 'true';
+    const unlisted = meta.unlisted?.toLowerCase() === 'true';
     const document = shell({ title: meta.title || site.title, description: meta.description, body, route, rawPath, unlisted });
     if (!unlisted) {
       pages.push({ route, rawPath, title: meta.title || site.title, description: meta.description || site.description, md: pageMarkdown });
