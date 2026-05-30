@@ -194,7 +194,7 @@ const commandDocs = [
   ['trust', 'trust']
 ];
 
-function shell({ title, description, body, route, rawPath }) {
+function shell({ title, description, body, route, rawPath, unlisted = false }) {
   const canonical = `${site.origin}${route === '/' ? '/' : route}`;
   const mdLink = rawPath ? `<a class="footer-resource footer-markdown" href="${escapeHtml(rawPath)}" aria-label="Markdown"><span class="footer-icon" aria-hidden="true">MD</span><span class="footer-label">Markdown</span></a>` : '';
   return `<!doctype html>
@@ -204,6 +204,7 @@ function shell({ title, description, body, route, rawPath }) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description || site.description)}">
+${unlisted ? '<meta name="robots" content="noindex, nofollow">' : ''}
 <link rel="canonical" href="${canonical}">
 ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.origin + rawPath)}">` : ''}
 <meta property="og:title" content="${escapeHtml(title)}">
@@ -386,9 +387,12 @@ async function build() {
     const body = route.startsWith('/docs/commands/')
       ? commandPageBody(pageMarkdown, route)
       : `<article class="page ${meta.layout || ''}">${heroLogo}${html}</article>`;
-    const document = shell({ title: meta.title || site.title, description: meta.description, body, route, rawPath });
-    pages.push({ route, rawPath, title: meta.title || site.title, description: meta.description || site.description, md: pageMarkdown });
-    fullTexts.push(`# ${meta.title || route}\n\nSource: ${site.origin}${rawPath}\n\n${pageMarkdown.trim()}\n`);
+    const unlisted = meta.unlisted?.toLowerCase() === 'true';
+    const document = shell({ title: meta.title || site.title, description: meta.description, body, route, rawPath, unlisted });
+    if (!unlisted) {
+      pages.push({ route, rawPath, title: meta.title || site.title, description: meta.description || site.description, md: pageMarkdown });
+      fullTexts.push(`# ${meta.title || route}\n\nSource: ${site.origin}${rawPath}\n\n${pageMarkdown.trim()}\n`);
+    }
     if (!checkOnly) {
       const dir = path.join(distDir, route === '/' ? '' : route);
       await fs.mkdir(dir, { recursive: true });
