@@ -1,6 +1,6 @@
 ---
 name: jbx
-description: Install jbx and load version-matched Java workflow guidance with jbx skill list and jbx skill get.
+description: Use jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools.
 ---
 
 # jbx
