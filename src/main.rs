@@ -4334,7 +4334,11 @@ fn rewrite_module_coordinate(module: &str, version: &str) -> String {
 fn rewrite_core_module_short_names() -> &'static [&'static str] {
     &[
         "java",
+        "java-8",
+        "java-11",
+        "java-17",
         "java-21",
+        "java-25",
         "xml",
         "yaml",
         "properties",
@@ -4412,10 +4416,26 @@ fn search_rewrite_modules(cmd: &RewriteModulesCommand) -> Result<Vec<RewriteModu
 }
 
 fn rewrite_module_search_query(group: &str, search: Option<&str>) -> String {
+    let group = solr_escape_term(group.trim());
     match search.map(str::trim).filter(|value| !value.is_empty()) {
-        Some(search) => format!("g:{group} AND {search}"),
+        Some(search) => format!("g:{group} AND {}", solr_escape_term(search)),
         None => format!("g:{group} AND a:rewrite\\-*"),
     }
+}
+
+fn solr_escape_term(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '+' | '-' | '&' | '|' | '!' | '(' | ')' | '{' | '}' | '[' | ']' | '^' | '"' | '~'
+            | '*' | '?' | ':' | '\\' | '/' | ' ' | '\t' | '\n' | '\r' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 fn rewrite_module_from_search_doc(
@@ -7920,6 +7940,38 @@ String value = example.readValue("{}", String.class);</pre>
         assert!(
             markdown.contains("- `T readValue(String content) throws IOException`"),
             "{markdown}"
+        );
+    }
+
+    #[test]
+    fn rewrite_module_coordinate_keeps_versioned_java_modules_in_core_group() {
+        assert_eq!(
+            rewrite_module_coordinate("java-8", "8.60.0"),
+            "org.openrewrite:rewrite-java-8:8.60.0"
+        );
+        assert_eq!(
+            rewrite_module_coordinate("java-11", "8.60.0"),
+            "org.openrewrite:rewrite-java-11:8.60.0"
+        );
+        assert_eq!(
+            rewrite_module_coordinate("java-17", "8.60.0"),
+            "org.openrewrite:rewrite-java-17:8.60.0"
+        );
+        assert_eq!(
+            rewrite_module_coordinate("spring", "6.4.0"),
+            "org.openrewrite.recipe:rewrite-spring:6.4.0"
+        );
+    }
+
+    #[test]
+    fn rewrite_module_search_query_escapes_user_input() {
+        assert_eq!(
+            rewrite_module_search_query("org.openrewrite.recipe", Some("yaml")),
+            "g:org.openrewrite.recipe AND yaml"
+        );
+        assert_eq!(
+            rewrite_module_search_query("bad group:thing", Some("OR a:*")),
+            "g:bad\\ group\\:thing AND OR\\ a\\:\\*"
         );
     }
 
