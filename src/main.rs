@@ -4248,7 +4248,9 @@ fn resolve_rewrite_backend(
     let repos = maven_tool::maven_repositories(repos);
     let cache = cache_root(cache_dir)?;
     let deps_cache = cache.join("deps");
-    let java_home = jbx::jdk::resolve_jdk(&None, true)?;
+    // The published helper is compiled for Java 21, so do not run it on a
+    // lower default JVM just because the user's script selects one.
+    let java_home = jbx::jdk::resolve_jdk(&Some("21".to_string()), true)?;
     let java_major = jbx::jdk::detect_jdk_major_version(&java_home).ok_or_else(|| {
         anyhow::anyhow!(
             "failed to detect rewrite helper JDK version from {}",
