@@ -20,8 +20,7 @@ The Java ecosystem is rich. So rich that one can get easily lost. `jbx` (pronoun
     <button class="copy-command" type="button" data-copy-command="curl -fsSL https://jbx.telegraphic.dev/install.sh | bash">Copy</button>
   </div>
   <div class="install-command-box" id="install-agents" role="tabpanel" aria-labelledby="tab-agents" data-install-panel="agents" hidden>
-    <pre class="install-command"><code>$ curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
-$ jbx skill list</code></pre>
+    <pre class="install-command"><code>$ curl -fsSL https://jbx.telegraphic.dev/install.sh | bash&#10;$ jbx skill list</code></pre>
     <button class="copy-command" type="button" data-copy-command="curl -fsSL https://jbx.telegraphic.dev/install.sh | bash&#10;jbx skill list">Copy</button>
   </div>
 </div>
