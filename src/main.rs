@@ -834,9 +834,16 @@ struct SkillCommand {
 #[derive(Subcommand, Debug)]
 enum SkillSubcommand {
     /// List version-matched skills bundled with this jbx binary.
-    List,
+    List(SkillListCommand),
     /// Print a bundled skill. Defaults to the main jbx skill.
     Get(SkillGetCommand),
+}
+
+#[derive(Parser, Debug)]
+struct SkillListCommand {
+    /// Emit structured JSON for agents.
+    #[arg(long = "json")]
+    json: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -7544,18 +7551,160 @@ struct SkillEntry {
     content: &'static str,
 }
 
-const BUNDLED_SKILLS: &[SkillEntry] = &[SkillEntry {
-    name: "jbx",
-    description:
-        "One-stop shop Java toolbox for agents and humans. Inspired by JBang, uv and zerolang.",
-    content: include_str!("../skill-data/jbx/SKILL.md"),
-}];
+const BUNDLED_SKILLS: &[SkillEntry] = &[
+    SkillEntry {
+        name: "jbx",
+        description: "Single agent-friendly entry point to the Java ecosystem.",
+        content: include_str!("../skill-data/jbx/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-run",
+        description: "Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.",
+        content: include_str!("../skill-data/jbx-run/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-build",
+        description: "Compile a script into the jbx cache without running it.",
+        content: include_str!("../skill-data/jbx-build/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-check",
+        description: "Check Java source with structured diagnostics.",
+        content: include_str!("../skill-data/jbx-check/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-test",
+        description: "Run JUnit tests with optional JaCoCo coverage.",
+        content: include_str!("../skill-data/jbx-test/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-docs",
+        description: "Generate Markdown or JSON documentation from local sources or Maven artifacts.",
+        content: include_str!("../skill-data/jbx-docs/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-doctor",
+        description: "Diagnose JDKs, Maven, caches, trust, dependencies, and optional native/publish tools.",
+        content: include_str!("../skill-data/jbx-doctor/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-rewrite",
+        description: "Preview/apply OpenRewrite recipes and discover modules or recipes.",
+        content: include_str!("../skill-data/jbx-rewrite/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-search",
+        description: "Search Maven Central artifacts by text or coordinates.",
+        content: include_str!("../skill-data/jbx-search/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-resolve",
+        description: "Resolve Maven coordinates to dependency coordinates or classpaths.",
+        content: include_str!("../skill-data/jbx-resolve/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-fetch",
+        description: "Download artifacts and print classpath or dependency coordinates.",
+        content: include_str!("../skill-data/jbx-fetch/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-info",
+        description: "Print parsed directives and derived metadata from Java scripts.",
+        content: include_str!("../skill-data/jbx-info/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-cache",
+        description: "Inspect or clear compiled-script cache paths and entries.",
+        content: include_str!("../skill-data/jbx-cache/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-trust",
+        description: "Pin, list, remove, or clear trusted hashes for remote scripts.",
+        content: include_str!("../skill-data/jbx-trust/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-app",
+        description: "Install, list, or uninstall Java scripts as PATH commands.",
+        content: include_str!("../skill-data/jbx-app/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-alias",
+        description: "Add, remove, and list aliases from `jbang-catalog.json`.",
+        content: include_str!("../skill-data/jbx-alias/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-catalog",
+        description: "Add and list external catalogs in `jbang-catalog.json`.",
+        content: include_str!("../skill-data/jbx-catalog/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-template",
+        description: "List built-in and imported templates for `jbx init`.",
+        content: include_str!("../skill-data/jbx-template/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-init",
+        description: "Create Java 25+ scripts from built-in or imported templates.",
+        content: include_str!("../skill-data/jbx-init/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-export",
+        description: "Export local, portable, or native runnable artifacts.",
+        content: include_str!("../skill-data/jbx-export/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-publish",
+        description: "Build Maven-ready bundles, local served repositories, or Portal uploads.",
+        content: include_str!("../skill-data/jbx-publish/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-install",
+        description: "Install the current project into a Maven repository layout.",
+        content: include_str!("../skill-data/jbx-install/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-fmt",
+        description: "Format Java files with Palantir Java Format.",
+        content: include_str!("../skill-data/jbx-fmt/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-graph",
+        description: "Dump JavaParser native AST JSON or import it back to Java source.",
+        content: include_str!("../skill-data/jbx-graph/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-skill",
+        description: "List and print version-matched bundled agent skills.",
+        content: include_str!("../skill-data/jbx-skill/SKILL.md"),
+    },
+    SkillEntry {
+        name: "jbx-jdk",
+        description: "List, install, and locate JDKs used by jbx.",
+        content: include_str!("../skill-data/jbx-jdk/SKILL.md"),
+    },
+];
 
 fn run_skill(cmd: SkillCommand) -> Result<i32> {
     match cmd.command {
-        SkillSubcommand::List => {
-            for skill in BUNDLED_SKILLS {
-                println!("{}\t{}", skill.name, skill.description);
+        SkillSubcommand::List(cmd) => {
+            if cmd.json {
+                let skills: Vec<_> = BUNDLED_SKILLS
+                    .iter()
+                    .map(|skill| {
+                        serde_json::json!({
+                            "name": skill.name,
+                            "description": skill.description,
+                        })
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "skills": skills }))?
+                );
+            } else {
+                for skill in BUNDLED_SKILLS {
+                    println!("{}\t{}", skill.name, skill.description);
+                }
             }
             Ok(0)
         }

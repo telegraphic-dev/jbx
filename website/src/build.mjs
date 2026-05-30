@@ -9,8 +9,8 @@ const distDir = path.join(root, 'dist');
 const checkOnly = process.argv.includes('--check');
 const site = {
   origin: 'https://jbx.telegraphic.dev',
-  title: 'jbx — Java tools for agents',
-  description: 'A Rust-native, JBang-compatible Java toolbox built for autonomous agents and impatient humans.'
+  title: 'jbx — agent-friendly Java entry point',
+  description: 'Single agent-friendly entry point to the Java ecosystem.'
 };
 
 function escapeHtml(value = '') {
@@ -141,8 +141,7 @@ function markdownToHtml(markdown) {
 const nav = [
   ['/', 'Home'],
   ['/docs/', 'Docs'],
-  ['/brand/', 'Brand'],
-  ['/llms.txt', 'llms.txt']
+  ['/docs/commands/', 'Commands']
 ];
 
 function shell({ title, description, body, route, rawPath }) {
@@ -156,6 +155,7 @@ function shell({ title, description, body, route, rawPath }) {
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description || site.description)}">
 <link rel="canonical" href="${canonical}">
+${rawPath ? `<link rel="alternate" type="text/markdown" href="${site.origin}${rawPath}">` : ''}
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description || site.description)}">
 <meta property="og:image" content="${site.origin}/assets/social-card.png">
@@ -171,7 +171,7 @@ function shell({ title, description, body, route, rawPath }) {
 <main>${body}</main>
 <footer>
   <span>jbx by Telegraphic</span>
-  <span>${mdLink}<a href="https://github.com/telegraphic-dev/jbx">GitHub</a><a href="/llms-full.txt">llms-full.txt</a></span>
+  <span>${mdLink}<a href="https://github.com/telegraphic-dev/jbx">GitHub</a></span>
 </footer>
 <script>
 (() => {
@@ -249,10 +249,10 @@ async function build() {
       await fs.writeFile(path.join(distDir, rawPath), md.trim() + '\n');
     }
   }
-  const llms = `# jbx\n\n> ${site.description}\n\n## Canonical URLs\n\n- Website: ${site.origin}/\n- GitHub: https://github.com/telegraphic-dev/jbx\n- Agent guide: ${site.origin}/docs/agent-guide/\n- Markdown corpus: ${site.origin}/llms-full.txt\n\n## Pages\n\n${pages.map(p => `- [${p.title}](${site.origin}${p.rawPath}): ${p.description}`).join('\n')}\n`;
+  const llms = `# jbx\n\n> ${site.description}\n\n## Canonical URLs\n\n- Website: ${site.origin}/\n- GitHub: https://github.com/telegraphic-dev/jbx\n- Docs: ${site.origin}/docs/\n\n## Pages\n\n${pages.map(p => `- [${p.title}](${site.origin}${p.rawPath}): ${p.description}`).join('\n')}\n`;
   const llmsFull = `${llms}\n---\n\n${fullTexts.join('\n---\n\n')}`;
   const robots = `User-agent: *\nAllow: /\n\nSitemap: ${site.origin}/sitemap.xml\n`;
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${pages.map(p => `  <url><loc>${site.origin}${p.route === '/' ? '/' : p.route}</loc></url>`).join('\n')}\n  <url><loc>${site.origin}/llms.txt</loc></url>\n  <url><loc>${site.origin}/llms-full.txt</loc></url>\n</urlset>\n`;
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${pages.map(p => `  <url><loc>${site.origin}${p.route === '/' ? '/' : p.route}</loc></url>`).join('\n')}\n</urlset>\n`;
   if (!checkOnly) {
     await fs.writeFile(path.join(distDir, 'llms.txt'), llms);
     await fs.writeFile(path.join(distDir, 'llms-full.txt'), llmsFull);

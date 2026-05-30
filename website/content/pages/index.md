@@ -1,35 +1,33 @@
 ---
-title: jbx — Java tools for agents
-description: Rust-native, JBang-compatible Java tooling for autonomous agents and impatient humans.
+title: jbx — agent-friendly Java entry point
+description: Single agent-friendly entry point to the Java ecosystem.
 ---
 
-# Java tools for agents.
+# Single agent-friendly entry point to the Java ecosystem
 
-`jbx` is a Rust-native Java toolbox aiming for JBang compatibility first: script running, Maven tool execution, testing, formatting, publishing, cache management, and JDK handling behind one boringly reliable CLI.
+`jbx` gives developers and coding agents one practical CLI for Java scripts, Maven tools, tests, formatting, publishing, dependency lookup, documentation, diagnostics, and JDK handling.
 
 ```bash
 jbx Hello.java world
 jbx dev.telegraphic:hello-tool:1.0.0 -- --help
+jbx check src --json
 jbx docs com.fasterxml.jackson.core:jackson-databind --json
 jbx doctor Hello.java --json
 ```
 
-## Why it exists
+## What it gives you
 
-Agents do not need another clever Java wrapper. They need a tool that is scriptable, inspectable, deterministic, and fast enough to use repeatedly inside coding loops.
+- **One entry point.** Run scripts, launch Maven tools, inspect dependencies, test, format, export, publish, and diagnose without switching toolchains.
+- **Agent-ready output.** Commands that produce facts expose JSON modes, and the matching schemas live with the docs.
+- **Version-matched skills.** `jbx skill list` and `jbx skill get <name>` ship command guidance with the binary, so agents do not rely on stale web snippets.
+- **Human-readable docs.** Every command has a short page with examples, agent notes, and structured-output expectations.
 
-- Run Java scripts and Maven executable tools from one command.
-- Resolve, fetch, test, format, diagnose, export, publish, and document Java projects.
-- Prefer structured output for automation, plain Markdown for reading, and reproducible behavior over magic.
-- Stay compatible with JBang where users already have muscle memory.
+## Start here
 
-## Agent-facing surfaces
+```bash
+curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
+export PATH="$HOME/.jbx/bin:$PATH"
+jbx skill list
+```
 
-- [`/llms.txt`](/llms.txt) gives crawlers and agents the canonical short map.
-- [`/llms-full.txt`](/llms-full.txt) is the full Markdown corpus.
-- Every page is also served as Markdown beside the HTML version.
-- [`jbx docs`](/docs/agent-guide/) produces agent-readable Markdown and JSON sidecars for Java libraries.
-
-## Current status
-
-`jbx` is early and moving quickly. The intent is not novelty for novelty’s sake; first the boring parts become reliable, then the interesting parts earn their keep.
+Then use the [command reference](/docs/commands/) for the task at hand.

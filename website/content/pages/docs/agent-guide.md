@@ -9,10 +9,9 @@ Use `jbx` as a command-line surface, not as a guessing game. Prefer commands tha
 
 ## Website contract
 
-- Read `/llms.txt` first for the canonical map.
-- Read `/llms-full.txt` when you need the full current website context in one request.
-- Prefer route Markdown (`/docs/getting-started.md`) over HTML when building context.
+- Prefer the Markdown sibling of any documentation page over scraping HTML when building context.
 - Use canonical links under `https://jbx.telegraphic.dev/`.
+- Discover command-specific guidance from `jbx skill list` and `jbx skill get <name>` so the installed binary stays the source of truth.
 
 ## CLI contract
 
@@ -45,4 +44,4 @@ jbx cache path
 - Use `jbx rewrite modules [--group groupId] [--rewrite-version version] --json` and `jbx rewrite recipes <module> --detail --json` to discover OpenRewrite modules, recipe short names/FQNs, descriptions, and options instead of guessing. Pass `--group` for non-default recipe module groups and `--rewrite-version` when the emitted coordinates must match a specific OpenRewrite runtime.
 - Use `--option key=value` for recipe parameters, `--report dir` for patch location, `--fail-on-changes` for CI-style checks, `--repo id=url` for private recipe modules, `--cache-dir dir` for isolated jobs, and `--rewrite-version version` when reproducing a specific OpenRewrite run.
 - Preserve JBang-compatible directives in scripts unless a task explicitly asks to change behavior.
-- When publishing, use dry-run and inspect staged artifacts before real release workflows. Put compile-time artifact dependencies in `dependencies` / `//DEPS`; put runtime-only implementations in `runtimeDependencies` / `//RUNTIME` so generated Maven metadata uses runtime scope without adding them to the compile classpath.
+- When publishing, use dry-run and inspect staged artifacts before real release workflows. Put compile-time artifact dependencies in `dependencies` / `//DEPS`; put runtime-only libraries in `runtimeDependencies` / `//RUNTIME` so generated Maven metadata uses runtime scope without adding them to the compile classpath.

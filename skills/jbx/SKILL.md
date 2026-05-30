@@ -1,56 +1,14 @@
 ---
 name: jbx
-description: One-stop shop Java toolbox for agents and humans. Inspired by JBang, uv and zerolang.
+description: Start with `jbx skill list` / `jbx skill get`; use direct script or Maven coordinate execution only for the common run path.
 ---
 
 # jbx
 
-jbx is the one-stop shop Java toolbox for agents and humans. Inspired by JBang, uv and zerolang.
-
-Install this discovery skill once in an agent's skill manager. Keep it thin; the `jbx` binary serves version-matched workflow guidance for each installed release.
-
-Install the latest native release:
+This installable discovery stub points agents to the version-matched skill bundled in the `jbx` binary.
 
 ```sh
-curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
-export PATH="$HOME/.jbx/bin:$PATH"
-jbx --version
+jbx skill get jbx
 ```
 
-## Version-Matched Skills
-
-This file is a discovery stub. Do not treat it as the full jbx workflow.
-
-Before editing, checking, testing, publishing, or repairing Java code with jbx, ask the installed binary for the skill content that matches that exact version:
-
-```sh
-jbx skill list
-jbx skill get
-```
-
-If the user has multiple jbx binaries, use the same binary that will run the project:
-
-```sh
-/path/to/jbx skill list
-/path/to/jbx skill get
-```
-
-## Common Entry Points
-
-```sh
-jbx <GAV|script.java> [args...]
-jbx check [path...] [--json]
-jbx test [script.java|directory] [--coverage] [--jacoco-version version]
-jbx test [script.java|directory] --coverage --json
-jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--json]
-jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--json]
-jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json] [--rewrite-version version]
-jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json]
-jbx docs <GAV|source|dir> [--json]
-jbx skill list
-jbx skill get
-```
-
-## Publishing Metadata
-
-For published artifacts, keep compile-time dependencies in `dependencies` / `//DEPS`. Put runtime-only implementations in `runtimeDependencies` in `jbx.json` or `//RUNTIME` script directives; `jbx publish` writes those to generated Maven metadata with `runtime` scope without requiring them on the compile classpath. Always run `jbx publish --dry-run` and inspect the staged POM before a real release.
+Use the bundled output as the source of truth for the installed release.
