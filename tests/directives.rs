@@ -5,6 +5,7 @@ fn parses_core_jbang_directives() {
     let src = r#"
 //JAVA 25
 //DEPS org.slf4j:slf4j-simple:2.0.13, org.slf4j:slf4j-api:2.0.13
+//RUNTIME org.slf4j:slf4j-nop:2.0.13
 //REPOS central=https://repo1.maven.org/maven2
 //SOURCES helper.java
 //JAVAC_OPTIONS --enable-preview "-Xlint:all"
@@ -24,6 +25,7 @@ class Main {}
             "org.slf4j:slf4j-api:2.0.13"
         ]
     );
+    assert_eq!(directives.runtime_deps, vec!["org.slf4j:slf4j-nop:2.0.13"]);
     assert_eq!(
         directives.repos,
         vec!["central=https://repo1.maven.org/maven2"]

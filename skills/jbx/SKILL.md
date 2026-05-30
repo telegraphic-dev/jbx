@@ -44,9 +44,13 @@ jbx test [script.java|directory] [--coverage] [--jacoco-version version]
 jbx test [script.java|directory] --coverage --json
 jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--json]
 jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--json]
-jbx rewrite modules [--search term] [--limit n] [--json]
+jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json] [--rewrite-version version]
 jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json]
 jbx docs <GAV|source|dir> [--json]
 jbx skill list
 jbx skill get
 ```
+
+## Publishing Metadata
+
+For published artifacts, keep compile-time dependencies in `dependencies` / `//DEPS`. Put runtime-only implementations in `runtimeDependencies` in `jbx.json` or `//RUNTIME` script directives; `jbx publish` writes those to generated Maven metadata with `runtime` scope without requiring them on the compile classpath. Always run `jbx publish --dry-run` and inspect the staged POM before a real release.

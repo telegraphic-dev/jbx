@@ -40,11 +40,11 @@ Implemented now:
 - `jbx doctor [script.java|url] [--json] [--cache-dir dir] [--repo id=url] [--publish] [--native]` diagnoses JDK selection, Maven Central reachability, cache writability, formatter fallback, remote trust, dependency resolution/version drift, and context-only tools such as GPG/native-image
 - `jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json] [--fail-on-changes] [--no-fail-on-invalid-recipes] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` previews OpenRewrite changes and writes `rewrite/rewrite.patch`
 - `jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json] [--fail-on-changes] [--no-fail-on-invalid-recipes] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` applies OpenRewrite changes to source files
-- `jbx rewrite modules [--search term] [--limit n] [--json] [--rewrite-version version]` lists searchable standard OpenRewrite modules known by jbx
-- `jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` lists/searches recipes available from a module, including jbx short names where known
+- `jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json] [--rewrite-version version]` searches Maven Central for OpenRewrite modules by group and recipe/module name
+- `jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` lists/searches recipes available from a module; human output is a table with derived short names and FQNs, JSON includes descriptors/options
 - `jbx graph dump <script.java>` print JavaParser's native AST JSON serialization
 - `jbx graph import <ast.json> [-o script.java]` converts JavaParser's native AST JSON serialization back to Java source
-- `jbx rewrite` runs OpenRewrite through jbx-managed dependencies and JDKs. Use `jbx rewrite patch` for previews and `jbx rewrite apply` for source mutation. Use `--recipe <short|fqn>` for recipe aliases such as `auto-format`, `format`, `cleanup`, `remove-unused-imports`, and `change-package`; use `--module <short|GAV>` for extra OpenRewrite modules (`yaml` expands to `org.openrewrite:rewrite-yaml:<version>`, full GAVs are passed through). Standard module aliases are `java`, `java-21`, `xml`, `yaml`, `properties`, `json`, `maven`, `gradle`, `groovy`, `kotlin`, `protobuf`, and `hcl`. Java recipe support is built in, Maven modules are not loaded unless requested. Recipe options use `--option key=value`; `change-package` also accepts `old=` and `new=` aliases. Use `jbx rewrite modules` to search standard modules and `jbx rewrite recipes <short|GAV> --detail` to search recipes and inspect descriptions/options.
+- `jbx rewrite` runs OpenRewrite through jbx-managed dependencies and JDKs. Use `jbx rewrite patch` for previews and `jbx rewrite apply` for source mutation. Use `--recipe <short|fqn>` for recipe aliases such as `auto-format`, `format`, `cleanup`, `remove-unused-imports`, and `change-package`; use `--module <short|GAV>` for extra OpenRewrite modules (`yaml` expands to `org.openrewrite:rewrite-yaml:<version>`, full GAVs are passed through). Standard module aliases are `java`, `java-21`, `xml`, `yaml`, `properties`, `json`, `maven`, `gradle`, `groovy`, `kotlin`, `protobuf`, and `hcl`. Java recipe support is built in, Maven modules are not loaded unless requested. Recipe options use `--option key=value`; `change-package` also accepts `old=` and `new=` aliases. Use `jbx rewrite modules` to search Maven Central for `rewrite-*` modules under `org.openrewrite.recipe` and `org.openrewrite` by default; pass `--group` for other recipe groups. Use `jbx rewrite recipes <short|GAV> --detail` to search recipes and inspect short names, FQNs, descriptions, and options.
 - `jbx export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `jbx export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
 - `jbx export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
@@ -68,6 +68,7 @@ Implemented now:
 - directive parsing for:
   - `//JAVA`
   - `//DEPS`
+  - `//RUNTIME`
   - `//REPOS`
   - `//SOURCES`
   - `//FILES`
@@ -198,6 +199,9 @@ jbx dev.telegraphic:hello-tool:1.0.0 -- --help
   "dependencies": [
     "info.picocli:picocli:4.7.7"
   ],
+  "runtimeDependencies": [
+    "org.slf4j:slf4j-nop:2.0.17"
+  ],
   "repositories": [
     "https://repo.maven.apache.org/maven2"
   ]
@@ -213,6 +217,8 @@ CENTRAL_TOKEN_USERNAME=... CENTRAL_TOKEN_PASSWORD=... jbx publish --file jbx.jso
 ```
 
 Use `--version` when release/tag workflows need to publish a different version than the descriptor. The `main` field accepts either a source path (`src/main/java/dev/telegraphic/demo/HelloTool.java`) or a Java FQN (`dev.telegraphic.demo.HelloTool`). If `main` has no extension, `jbx publish` first checks the exact path, then tries `.java`, `.jsh`, and `.jav` next to the descriptor, then scans Java sources under the descriptor directory for a matching package/class declaration; missing main files get an explicit `publish main source not found` error.
+
+Use `dependencies` / `//DEPS` for dependencies needed to compile the published artifact. Use `runtimeDependencies` / `//RUNTIME` for runtime-only implementations that should appear in generated Maven metadata with `runtime` scope without being required on the compile classpath.
 
 For GitHub-hosted repositories, `jbx publish` can prefill Maven Central POM `url`, `licenses`, `developers`, and `scm` metadata from the `origin` remote plus `gh repo view` when those fields are omitted. Put the fields in `jbx.json` when you want explicit release metadata instead of GitHub-derived defaults. Signed Central-ready bundles require a configured GPG key; `--skip-signing` is only for local inspection. Real Portal publishing requires a generated Maven Central user token supplied via environment variables only: preferably `CENTRAL_TOKEN_USERNAME` / `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` containing the base64-encoded `username:password` value expected by the Portal API.
 

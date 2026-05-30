@@ -38,7 +38,7 @@ jbx fmt [path...]
 jbx doctor [script.java|url] [--json] [--cache-dir dir] [--repo id=url] [--publish] [--native]
 jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
 jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
-jbx rewrite modules [--search term] [--limit n] [--json] [--rewrite-version version]
+jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json] [--rewrite-version version]
 jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json]
 jbx docs <GAV|source|dir> [--json]
 jbx search <text|group:artifact[:version]> [--json]
@@ -80,11 +80,24 @@ Run-mode options: `--option key=value` passes recipe options, `--report dir` cha
 Useful discovery commands:
 
 ```sh
-jbx rewrite modules --search yaml --json
+jbx rewrite modules --search yaml --group org.openrewrite --rewrite-version 8.60.0 --json
 jbx rewrite recipes yaml --search format --detail --json
 ```
 
 Known recipe aliases include `auto-format`, `format`, `cleanup`, `remove-unused-imports`, and `change-package`. Known module aliases are `java`, `java-21`, `xml`, `yaml`, `properties`, `json`, `maven`, `gradle`, `groovy`, `kotlin`, `protobuf`, and `hcl`. Java recipe support is built in; extra modules are resolved only when supplied with `--module`.
+
+## Publishing Dependency Scopes
+
+When publishing, keep compile-time dependencies in `dependencies` in `jbx.json` or `//DEPS` directives. Put runtime-only implementations in `runtimeDependencies` or `//RUNTIME`; `jbx publish` writes them to generated Maven metadata with `runtime` scope without requiring them on the compile classpath.
+
+```json
+{
+  "dependencies": ["info.picocli:picocli:4.7.7"],
+  "runtimeDependencies": ["org.slf4j:slf4j-nop:2.0.17"]
+}
+```
+
+Always run `jbx publish --dry-run` and inspect the staged POM before publishing for real.
 
 Publishing requires signing plus Maven Central Portal credentials. Use `--gpg-key <key-id>` for signed Central-ready bundles. Supply either `CENTRAL_TOKEN_USERNAME` plus `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` as `base64(username:password)`. Use `--skip-signing` only for local inspection, not real publishing.
 
