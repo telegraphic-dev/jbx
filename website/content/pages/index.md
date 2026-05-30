@@ -15,8 +15,14 @@ The Java ecosystem is rich. So rich that one can get easily lost. `jbx` (pronoun
     <span aria-hidden="true">|</span>
     <button type="button" role="tab" aria-selected="false" aria-controls="install-agents" id="tab-agents" data-install-tab="agents">For agents</button>
   </div>
-  <pre class="install-command" id="install-humans" role="tabpanel" aria-labelledby="tab-humans" data-install-panel="humans"><code>$ curl -fsSL https://jbx.telegraphic.dev/install.sh | bash</code></pre>
-  <pre class="install-command" id="install-agents" role="tabpanel" aria-labelledby="tab-agents" data-install-panel="agents" hidden><code>$ npx skills add telegraphic-dev/jbx</code></pre>
+  <div class="install-command-box" id="install-humans" role="tabpanel" aria-labelledby="tab-humans" data-install-panel="humans">
+    <pre class="install-command"><code>$ curl -fsSL https://jbx.telegraphic.dev/install.sh | bash</code></pre>
+    <button class="copy-command" type="button" data-copy-command="curl -fsSL https://jbx.telegraphic.dev/install.sh | bash">Copy</button>
+  </div>
+  <div class="install-command-box" id="install-agents" role="tabpanel" aria-labelledby="tab-agents" data-install-panel="agents" hidden>
+    <pre class="install-command"><code>$ npx skills add telegraphic-dev/jbx</code></pre>
+    <button class="copy-command" type="button" data-copy-command="npx skills add telegraphic-dev/jbx">Copy</button>
+  </div>
 </div>
 
 </section>
