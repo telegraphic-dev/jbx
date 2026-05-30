@@ -52,4 +52,4 @@ jbx skill get
 
 ## Publishing Metadata
 
-Use `dependencies` in `jbx.json` or `//DEPS` in a script for compile-time artifact dependencies. Use `runtimeDependencies` or `//RUNTIME` for runtime-only implementations; jbx emits those as Maven runtime-scope dependencies without making them part of the compile classpath.
+For published artifacts, keep compile-time dependencies in `dependencies` / `//DEPS`. Put runtime-only implementations in `runtimeDependencies` in `jbx.json` or `//RUNTIME` script directives; `jbx publish` writes those to generated Maven metadata with `runtime` scope without requiring them on the compile classpath. Always run `jbx publish --dry-run` and inspect the staged POM before a real release.
