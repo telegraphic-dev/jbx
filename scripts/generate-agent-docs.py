@@ -88,7 +88,13 @@ description: Install jbx and load version-matched Java workflow guidance with jb
 
 Install this skill once in an agent's skill manager. Keep it thin; the `jbx` binary serves version-matched command guidance for the exact installed CLI.
 
-Install the latest release:
+Important: this skill is only the discovery stub. It does **not** install the `jbx` executable. Before using any `jbx ...` command, verify the binary exists:
+
+```sh
+command -v jbx || echo "jbx binary is not installed"
+```
+
+If `jbx` is missing, install the `jbx` binary itself — not Java/JDK and not more static skills:
 
 ```sh
 curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
@@ -96,7 +102,7 @@ export PATH="$HOME/.jbx/bin:$PATH"
 jbx --version
 ```
 
-Java/JDK is not a prerequisite for installing or starting with `jbx`. Install the `jbx` binary first; `jbx` discovers existing JDKs and provisions the required Temurin JDK when a Java command actually needs Java.
+Do **not** install an OS Java/JDK just to make `jbx` usable. Java/JDK is not a prerequisite for installing or starting with `jbx`; the binary discovers existing JDKs and provisions the required Temurin JDK when a Java command actually needs Java.
 
 ## Version-Matched Skills
 
