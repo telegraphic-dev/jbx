@@ -201,7 +201,7 @@ unzip -l target/central-bundle.zip
 For a local end-to-end rehearsal, serve the artifact from a temporary Maven repository:
 
 ```bash
-jbx publish --file jbx.json --serve 0
+jbx publish --file jbx.json --serve 0 --skip-signing
 ```
 
 `--serve 0` prints a loopback repository URL. In another terminal, use that URL to run the tool from coordinates:
