@@ -1,6 +1,7 @@
 ---
+
 title: jbx build command
-description: Compile a script into the jbx cache without running it.
+description: Compile Java source without running it
 ---
 
 # `build`
@@ -48,6 +49,49 @@ No `--json` mode yet. Success/failure is the exit code and compiler diagnostics 
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx build`
+
+```text
+Compile and store script in the cache without running it
+
+Usage: jbx build [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+      --deps <DEPS>
+          Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>
+          Additional repository, same shape as //REPOS
+      --source <SOURCES>
+          Additional source file, same shape as //SOURCES
+      --files <FILES>
+          Additional file/resource, same shape as //FILES
+      --class-path <CLASSPATH>
+          Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>
+          Additional javac option
+      --runtime-option <RUNTIME_OPTIONS>
+          Additional java runtime option, same shape as //JAVA_OPTIONS
+      --java <JAVA_VERSION>
+          Override //JAVA requested version
+      --javaagent <JAVA_AGENTS>
+          Additional java agent, same shape as //JAVAAGENT
+      --main <MAIN_CLASS>
+          Override //MAIN / inferred class name
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+      --trust
+          Trust this remote script content hash before building
+  -h, --help
+          Print help
+```
 
 ## Skill
 

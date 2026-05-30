@@ -9,8 +9,8 @@ const distDir = path.join(root, 'dist');
 const checkOnly = process.argv.includes('--check');
 const site = {
   origin: 'https://jbx.telegraphic.dev',
-  title: 'jbx — agent-friendly Java entry point',
-  description: 'Single agent-friendly entry point to the Java ecosystem.'
+  title: 'jbx — Java toolbox for scripts, tools, and automation',
+  description: 'One practical CLI for Java scripts, Maven tools, tests, formatting, publishing, dependency lookup, documentation, diagnostics, and JDK handling.'
 };
 
 function escapeHtml(value = '') {
@@ -83,7 +83,7 @@ function inline(md) {
   return out;
 }
 
-function markdownToHtml(markdown) {
+function markdownToHtml(markdown, { headingPrefix = '' } = {}) {
   const lines = markdown.split('\n');
   const html = [];
   let inCode = false;
@@ -91,6 +91,7 @@ function markdownToHtml(markdown) {
   let code = [];
   let list = [];
   let paragraph = [];
+  const seenHeadingIds = new Map();
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -125,7 +126,11 @@ function markdownToHtml(markdown) {
       flushParagraph(); flushList();
       const level = heading[1].length;
       const text = heading[2].trim();
-      html.push(`<h${level} id="${slugify(text)}">${inline(text)}</h${level}>`);
+      const baseId = headingPrefix + slugify(text);
+      const seen = seenHeadingIds.get(baseId) || 0;
+      seenHeadingIds.set(baseId, seen + 1);
+      const id = seen === 0 ? baseId : `${baseId}-${seen + 1}`;
+      html.push(`<h${level} id="${escapeHtml(id)}">${inline(text)}</h${level}>`);
       continue;
     }
     const bullet = line.match(/^[-*]\s+(.+)$/);
@@ -142,6 +147,35 @@ const nav = [
   ['/', 'Home'],
   ['/docs/', 'Docs'],
   ['/docs/commands/', 'Commands']
+];
+
+const commandDocs = [
+  ['alias', 'alias'],
+  ['app', 'app'],
+  ['build', 'build'],
+  ['cache', 'cache'],
+  ['catalog', 'catalog'],
+  ['check', 'check'],
+  ['docs', 'docs'],
+  ['doctor', 'doctor'],
+  ['export', 'export'],
+  ['fetch', 'fetch'],
+  ['fmt', 'fmt'],
+  ['graph', 'graph'],
+  ['info', 'info'],
+  ['init', 'init'],
+  ['install', 'install'],
+  ['jbx', 'top-level'],
+  ['jdk', 'jdk'],
+  ['publish', 'publish'],
+  ['resolve', 'resolve'],
+  ['rewrite', 'rewrite'],
+  ['run', 'run'],
+  ['search', 'search'],
+  ['skill', 'skill'],
+  ['template', 'template'],
+  ['test', 'test'],
+  ['trust', 'trust']
 ];
 
 function shell({ title, description, body, route, rawPath }) {
@@ -166,11 +200,14 @@ ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.
 <body>
 <header class="site-header">
   <a class="mark" href="/"><img src="/assets/jbx-toolbox-logo-256.png" alt="jbx toolbox logo"><span>jbx</span></a>
-  <nav>${nav.map(([href, label]) => `<a href="${href}"${route === href ? ' aria-current="page"' : ''}>${label}</a>`).join('')}<button class="theme-toggle" type="button" aria-label="Toggle light and dark theme">Theme</button></nav>
+  <nav>${nav.map(([href, label]) => {
+    const active = route === href || (href === '/docs/' && route.startsWith('/docs/') && !route.startsWith('/docs/commands/')) || (href === '/docs/commands/' && route.startsWith('/docs/commands/'));
+    return `<a href="${href}"${active ? ' aria-current="page"' : ''}>${label}</a>`;
+  }).join('')}<button class="theme-toggle" type="button" aria-label="Toggle light and dark theme">Theme</button></nav>
 </header>
 <main>${body}</main>
 <footer>
-  <span>jbx by Telegraphic</span>
+  <span>jbx by <a href="https://telegraphic.dev">telegraphic.dev</a></span>
   <span>${mdLink}<a href="https://github.com/telegraphic-dev/jbx">GitHub</a></span>
 </footer>
 <script>
@@ -188,6 +225,17 @@ ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.
     localStorage.setItem(key, next);
     apply(next);
   });
+  const commandSearch = document.querySelector('[data-command-search]');
+  const commandLinks = [...document.querySelectorAll('[data-command-link]')];
+  const filterCommands = () => {
+    const query = commandSearch?.value.trim().toLowerCase() || '';
+    for (const link of commandLinks) {
+      const haystack = (link.textContent + ' ' + link.getAttribute('href')).toLowerCase();
+      link.style.display = query && !haystack.includes(query) ? 'none' : '';
+    }
+  };
+  commandSearch?.addEventListener('input', filterCommands);
+  filterCommands();
 })();
 </script>
 </body>
@@ -224,6 +272,17 @@ function routeFor(file) {
   return `/${rel}/`;
 }
 
+function commandPageBody(markdown, route) {
+  const currentFile = route === '/docs/commands/' ? null : route.replace(/^\/docs\/commands\//, '').replace(/\/$/, '');
+  const tocLinks = commandDocs.map(([label, fileName]) => {
+    const href = `/docs/commands/${fileName}/`;
+    const current = fileName === currentFile;
+    return `<a href="${href}" data-command-link${current ? ' aria-current="page"' : ''}>${label}</a>`;
+  }).join('');
+  const toc = `<aside class="toc" aria-label="Command table of contents"><strong>Commands</strong><label class="toc-search"><span>Search commands</span><input type="search" placeholder="search…" autocomplete="off" data-command-search></label><div class="toc-links">${tocLinks}</div></aside>`;
+  return `<div class="docs-with-toc">${toc}<article class="page commands-reference">${markdownToHtml(markdown)}</article></div>`;
+}
+
 async function build() {
   if (!checkOnly) await fs.rm(distDir, { recursive: true, force: true });
   if (!checkOnly) await fs.mkdir(distDir, { recursive: true });
@@ -235,18 +294,21 @@ async function build() {
     const [meta, md] = parseFrontmatter(raw);
     const route = routeFor(file);
     const rawPath = route === '/' ? '/index.md' : `${route.replace(/\/$/, '')}.md`;
-    const html = markdownToHtml(md);
+    const pageMarkdown = md;
+    const html = markdownToHtml(pageMarkdown);
     const heroLogo = route === '/' ? '<img class="hero-logo" src="/assets/jbx-toolbox-logo.png" alt="jbx blue toolbox logo">' : '';
-    const body = `<article class="page ${meta.layout || ''}">${heroLogo}${html}</article>`;
+    const body = route.startsWith('/docs/commands/')
+      ? commandPageBody(pageMarkdown, route)
+      : `<article class="page ${meta.layout || ''}">${heroLogo}${html}</article>`;
     const document = shell({ title: meta.title || site.title, description: meta.description, body, route, rawPath });
-    pages.push({ route, rawPath, title: meta.title || site.title, description: meta.description || site.description, md });
-    fullTexts.push(`# ${meta.title || route}\n\nSource: ${site.origin}${rawPath}\n\n${md.trim()}\n`);
+    pages.push({ route, rawPath, title: meta.title || site.title, description: meta.description || site.description, md: pageMarkdown });
+    fullTexts.push(`# ${meta.title || route}\n\nSource: ${site.origin}${rawPath}\n\n${pageMarkdown.trim()}\n`);
     if (!checkOnly) {
       const dir = path.join(distDir, route === '/' ? '' : route);
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(path.join(dir, 'index.html'), document);
       await fs.mkdir(path.dirname(path.join(distDir, rawPath)), { recursive: true });
-      await fs.writeFile(path.join(distDir, rawPath), md.trim() + '\n');
+      await fs.writeFile(path.join(distDir, rawPath), pageMarkdown.trim() + '\n');
     }
   }
   const llms = `# jbx\n\n> ${site.description}\n\n## Canonical URLs\n\n- Website: ${site.origin}/\n- GitHub: https://github.com/telegraphic-dev/jbx\n- Docs: ${site.origin}/docs/\n\n## Pages\n\n${pages.map(p => `- [${p.title}](${site.origin}${p.rawPath}): ${p.description}`).join('\n')}\n`;

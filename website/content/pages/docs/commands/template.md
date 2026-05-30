@@ -1,6 +1,7 @@
 ---
+
 title: jbx template command
-description: List built-in and imported templates for `jbx init`.
+description: List built-in and imported templates for jbx init.
 ---
 
 # `template`
@@ -48,6 +49,37 @@ Run `template list --json` before `init` when the requested shape is vague. Pref
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx template`
+
+```text
+List init templates
+
+Usage: jbx template <COMMAND>
+
+Commands:
+  list  List built-in init templates
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx template list`
+
+```text
+List built-in init templates
+
+Usage: jbx template list [OPTIONS]
+
+Options:
+      --json  Print JSON instead of tab-separated text
+  -h, --help  Print help
+```
 
 ## Skill
 

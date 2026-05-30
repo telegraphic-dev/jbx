@@ -3,61 +3,109 @@ name: jbx-app
 description: Install, list, or uninstall Java scripts as PATH commands.
 ---
 
-# jbx-app
+# `app`
 
 Install, list, or uninstall Java scripts as PATH commands.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-app
-```
-
-## Use when
+## When to use it
 
 - Promote a frequently used Java script into a normal shell command.
 - Install a repository-local developer tool in CI images.
 - Remove stale wrappers after a script is renamed.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx app install tools/report.java --name report
 jbx app list
 jbx app uninstall report
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `app` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Promote a frequently used Java script into a normal shell command.
-- Install a repository-local developer tool in CI images.
-- Remove stale wrappers after a script is renamed.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Installing modifies user PATH-facing state. Confirm intent unless the task explicitly asks for installation. After install, run the command with `--help` or a harmless argument.
 
-## Structured output
+## JSON and schema
 
 No `--json` mode yet. Use `app list` for installed command names and paths.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx app`
+
+```text
+Manage scripts installed as commands on PATH
+
+Usage: jbx app <COMMAND>
+
+Commands:
+  install    Install a script as a command on PATH
+  uninstall  Remove an installed command
+  list       List installed script commands
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx app install`
+
+```text
+Install a script as a command on PATH
+
+Usage: jbx app install [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file to install
+
+Options:
+  -n, --name <NAME>  Command name (defaults to the script filename stem)
+      --force        Force overwrite an existing command
+  -h, --help         Print help
+```
+
+### `jbx app list`
+
+```text
+List installed script commands
+
+Usage: jbx app list
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx app uninstall`
+
+```text
+Remove an installed command
+
+Usage: jbx app uninstall <NAME>
+
+Arguments:
+  <NAME>  Command name to remove
+
+Options:
+  -h, --help  Print help
+```

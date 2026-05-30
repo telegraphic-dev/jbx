@@ -1,65 +1,73 @@
 ---
 name: jbx-init
-description: Create Java 25+ scripts from built-in or imported templates.
+description: Create Java sources from built-in or imported templates.
 ---
 
-# jbx-init
+# `init`
 
 Create Java 25+ scripts from built-in or imported templates.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-init
-```
-
-## Use when
+## When to use it
 
 - Start a new compact Java script with the expected shebang/directive style.
 - Create a small CLI skeleton with Picocli or team defaults.
 - Generate a test file that can immediately run through `jbx test`.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx init Hello.java
 jbx init --template cli tools/hello.java
 jbx init --template test src/test/java/SmokeTest.java
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `init` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Start a new compact Java script with the expected shebang/directive style.
-- Create a small CLI skeleton with Picocli or team defaults.
-- Generate a test file that can immediately run through `jbx test`.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 This creates files. If the target exists, do not overwrite without explicit instruction. After creation, inspect the file and run the narrowest validation command.
 
-## Structured output
+## JSON and schema
 
 No `--json` mode yet. The output is a newly created file; verify by checking the file and running `jbx check --json`.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
 
-> Tip: for exact release behavior, rerun `jbx skill get jbx-init` from the target machine.
+### `jbx init`
+
+```text
+Initialize a Java script
+
+Usage: jbx init [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file to initialize
+
+Options:
+  -t, --template <TEMPLATE>  Init script with the default Java template for now
+      --force                Force overwrite of existing files
+      --java <JAVA_VERSION>  Java version directive to write
+      --deps <DEPS>          Add dependencies, separated by comma, semicolon, or whitespace
+  -h, --help                 Print help
+```
+
+> For exact behavior, prefer the skill bundled with the `jbx` binary on the machine running the task.

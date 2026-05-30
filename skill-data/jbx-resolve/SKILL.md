@@ -1,63 +1,70 @@
 ---
 name: jbx-resolve
-description: Resolve Maven coordinates to dependency coordinates without running code.
+description: Resolve Maven coordinates
 ---
 
-# jbx-resolve
+# `resolve`
 
 Resolve Maven coordinates to dependency coordinates without running code.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-resolve
-```
-
-## Use when
+## When to use it
 
 - Inspect the dependency graph before committing a new `//DEPS`.
 - Check whether exclusions or runtime scopes change the graph.
 - Debug version mediation without executing user code.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx resolve com.fasterxml.jackson.core:jackson-databind:2.17.2
-jbx resolve --scope runtime org.slf4j:slf4j-simple:2.0.17
-jbx resolve --tree com.acme:app:1.0.0
+jbx resolve --repo snapshots=https://repo.example.com/snapshots com.acme:tool:1.0.0-SNAPSHOT
+jbx resolve --classpath com.acme:app:1.0.0
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `resolve` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Inspect the dependency graph before committing a new `//DEPS`.
-- Check whether exclusions or runtime scopes change the graph.
-- Debug version mediation without executing user code.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Use `resolve` for metadata questions. It should not be treated as proof that jars are already present locally; use `fetch` for that.
 
-## Structured output
+## JSON and schema
 
 No `--json` mode yet. Output is dependency coordinates or classpath-style text depending on flags. Use `fetch` when artifacts must be downloaded.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx resolve`
+
+```text
+Resolve Maven dependencies without running
+
+Usage: jbx resolve [OPTIONS] <COORDINATES>...
+
+Arguments:
+  <COORDINATES>...  Maven coordinates to resolve (groupId:artifactId:version)
+
+Options:
+      --repo <REPOS>           Additional repository (id=url format or bare URL)
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -c, --classpath              Print classpath (JAR paths) instead of coordinates
+  -h, --help                   Print help
+```

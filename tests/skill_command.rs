@@ -30,11 +30,12 @@ fn skill_get_defaults_to_jbx_skill() {
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.starts_with("---\nname: jbx\n"), "{stdout}");
+    assert!(stdout.contains("jbx skill list --json"), "{stdout}");
     assert!(
-        stdout.contains("curl -fsSL https://jbx.telegraphic.dev/install.sh | bash"),
+        stdout.contains("Usage: jbx [OPTIONS] [SCRIPT] [ARGS]... [COMMAND]"),
         "{stdout}"
     );
-    assert!(stdout.contains("jbx check [path...] --json"), "{stdout}");
+    assert!(!stdout.contains("jbx skill get jbx"), "{stdout}");
 }
 
 #[test]

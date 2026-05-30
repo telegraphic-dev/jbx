@@ -1,6 +1,7 @@
 ---
+
 title: jbx init command
-description: Create Java 25+ scripts from built-in or imported templates.
+description: Create Java sources from built-in or imported templates.
 ---
 
 # `init`
@@ -48,6 +49,28 @@ No `--json` mode yet. The output is a newly created file; verify by checking the
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx init`
+
+```text
+Initialize a Java script
+
+Usage: jbx init [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file to initialize
+
+Options:
+  -t, --template <TEMPLATE>  Init script with the default Java template for now
+      --force                Force overwrite of existing files
+      --java <JAVA_VERSION>  Java version directive to write
+      --deps <DEPS>          Add dependencies, separated by comma, semicolon, or whitespace
+  -h, --help                 Print help
+```
 
 ## Skill
 

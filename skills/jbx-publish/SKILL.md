@@ -1,65 +1,98 @@
 ---
 name: jbx-publish
-description: Build Maven Central-ready bundles, local served repositories, or Portal uploads from `jbx.json` and sources.
+description: Publish Java projects to Maven repositories, including Maven Central.
 ---
 
-# jbx-publish
+# `publish`
 
-Build Maven Central-ready bundles, local served repositories, or Portal uploads from `jbx.json` and sources.
+Publish Java projects to Maven repositories, including Maven Central.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-publish
-```
-
-## Use when
+## When to use it
 
 - Prepare a library or script artifact for Maven Central review.
 - Create a local Maven repository for integration tests.
 - Publish documentation sidecars next to Java artifacts so agents can inspect APIs.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx publish --file jbx.json --dry-run
-jbx publish --file jbx.json --local-repo build/repo
-jbx publish --file jbx.json --portal-upload
+jbx publish --file jbx.json --serve 8080
+jbx publish --file jbx.json --publish
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `publish` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Prepare a library or script artifact for Maven Central review.
-- Create a local Maven repository for integration tests.
-- Publish documentation sidecars next to Java artifacts so agents can inspect APIs.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Publishing can be external and irreversible. Use `--dry-run` first, inspect generated POMs/artifacts/signatures, and ask before real Portal upload unless explicitly requested.
 
-## Structured output
+## JSON and schema
 
 No `--json` mode yet. Use dry-run output and generated bundle files as the verification contract.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
 
-> Tip: for exact release behavior, rerun `jbx skill get jbx-publish` from the target machine.
+### `jbx publish`
+
+```text
+Prepare Maven Central publishing artifacts
+
+Usage: jbx publish [OPTIONS] [SCRIPT]
+
+Arguments:
+  [SCRIPT]  Java source file to publish. Defaults to jbx.json main when --file is used
+
+Options:
+      --file <FILE>
+          jbx descriptor file. Defaults to ./jbx.json when present
+      --version <VERSION>
+          Override version from jbx.json or //GAV
+  -o, --output <OUTPUT>
+          Output Maven Central bundle ZIP path
+      --target-dir <TARGET_DIR>
+          Working directory for staged publish artifacts
+      --package <PACKAGE_NAME>
+          Override package used when staging default-package sources
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+      --dry-run
+          Prepare and verify artifacts without uploading
+      --skip-signing
+          Allow unsigned dry-run bundles for local inspection
+      --gpg-key <GPG_KEY>
+          GPG key ID/email to use for detached ASCII signatures
+      --publish
+          Upload to Maven Central and publish after validation
+      --serve <SERVE>
+          Serve a local Maven repository containing the artifact on the given port
+      --publishing-type <PUBLISHING_TYPE>
+          Maven Central Portal publishing type for the upload [default: automatic] [possible values: automatic, user-managed]
+      --no-wait
+          Do not poll Central after uploading the deployment bundle
+      --max-wait-seconds <MAX_WAIT_SECONDS>
+          Maximum seconds to wait for Maven Central publication before exiting [default: 600]
+  -h, --help
+          Print help
+```
+
+> For exact behavior, prefer the skill bundled with the `jbx` binary on the machine running the task.

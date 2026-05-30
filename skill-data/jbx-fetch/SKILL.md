@@ -3,61 +3,68 @@ name: jbx-fetch
 description: Download artifacts and print classpath or dependency coordinates.
 ---
 
-# jbx-fetch
+# `fetch`
 
 Download artifacts and print classpath or dependency coordinates.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-fetch
-```
-
-## Use when
+## When to use it
 
 - Materialize jars before an offline CI step.
 - Build a classpath for an external Java command.
 - Verify that dependency artifacts are reachable from configured repositories.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx fetch com.fasterxml.jackson.core:jackson-databind:2.17.2
 jbx fetch --classpath org.junit.platform:junit-platform-console-standalone:1.11.4
 jbx fetch --deps-only com.acme:app:1.0.0
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `fetch` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Materialize jars before an offline CI step.
-- Build a classpath for an external Java command.
-- Verify that dependency artifacts are reachable from configured repositories.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Use `fetch` when file availability matters. Keep cache paths out of committed files and logs unless they are intentionally diagnostic.
 
-## Structured output
+## JSON and schema
 
 No `--json` mode yet. Output is meant for shell composition: classpath strings, paths, or dependency lists.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx fetch`
+
+```text
+Fetch Maven dependency artifacts and print classpath
+
+Usage: jbx fetch [OPTIONS] <COORDINATES>...
+
+Arguments:
+  <COORDINATES>...  Maven coordinates to fetch (groupId:artifactId:version)
+
+Options:
+      --repo <REPOS>           Additional repository (id=url format or bare URL)
+      --cache-dir <CACHE_DIR>  Override cache directory
+      --deps-only              Print resolved coordinates instead of classpath
+  -h, --help                   Print help
+```

@@ -1,4 +1,5 @@
 ---
+
 title: jbx skill command
 description: List and print version-matched bundled agent skills.
 ---
@@ -49,6 +50,52 @@ This is the first command an agent should run. Fetch the specific command skill,
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx skill`
+
+```text
+Print version-matched agent skills bundled with this jbx release
+
+Usage: jbx skill <COMMAND>
+
+Commands:
+  list  List version-matched skills bundled with this jbx binary
+  get   Print a bundled skill. Defaults to the main jbx skill
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx skill list`
+
+```text
+List version-matched skills bundled with this jbx binary
+
+Usage: jbx skill list [OPTIONS]
+
+Options:
+      --json  Emit structured JSON for agents
+  -h, --help  Print help
+```
+
+### `jbx skill get`
+
+```text
+Print a bundled skill. Defaults to the main jbx skill
+
+Usage: jbx skill get [NAME]
+
+Arguments:
+  [NAME]  Skill name to print. Defaults to jbx
+
+Options:
+  -h, --help  Print help
+```
 
 ## Skill
 

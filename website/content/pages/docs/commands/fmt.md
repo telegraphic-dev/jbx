@@ -1,6 +1,7 @@
 ---
+
 title: jbx fmt command
-description: Format Java files with Palantir Java Format, including Java 25 compact scripts.
+description: Format Java files with Palantir Java Format.
 ---
 
 # `fmt`
@@ -48,6 +49,39 @@ No `--json` mode yet. Formatting is verified by clean diff or a check-mode exit 
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx fmt`
+
+```text
+Format Java source files with Palantir Java Format
+
+Usage: jbx fmt [OPTIONS] [PATHS]...
+
+Arguments:
+  [PATHS]...
+          Java source files or directories. Defaults to the current directory
+
+          [default: .]
+
+Options:
+      --check
+          Check formatting without rewriting files
+
+      --formatter-version <FORMATTER_VERSION>
+          Palantir Java Format version to use.
+
+          Defaults to the cached latest Maven Central release, refreshed periodically.
+
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
 
 ## Skill
 

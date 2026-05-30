@@ -41,16 +41,16 @@ a { color: inherit; }
 .site-header { padding: 22px 0; }
 .mark { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 800; letter-spacing: -.01em; font-size: 1.5rem; }
 .mark img { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 12px 18px var(--shadow)); }
-nav { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+nav { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 nav a, footer a, .theme-toggle { text-decoration: none; color: var(--muted); border: 1px solid transparent; border-radius: 999px; padding: 9px 13px; }
 .theme-toggle { background: transparent; font: inherit; font-weight: 700; cursor: pointer; }
 nav a:hover, nav a[aria-current="page"], footer a:hover, .theme-toggle:hover { border-color: var(--line); background: var(--surface); color: var(--text); }
 main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
-.page { padding: 42px 0 64px; }
-.page > h1:first-of-type { font-size: clamp(3rem, 7.5vw, 6.6rem); line-height: .96; letter-spacing: -.025em; font-weight: 800; margin: 0 0 20px; max-width: 780px; }
+.page { padding: 36px 0 64px; }
+.page > h1:first-of-type { font-size: clamp(1.65rem, 4vw, 3.3rem); line-height: 1.06; letter-spacing: -.02em; font-weight: 800; margin: 0 0 18px; max-width: 620px; }
 .page > p:first-of-type { font-size: clamp(1.08rem, 1.7vw, 1.38rem); color: var(--muted); max-width: 760px; line-height: 1.6; }
-.hero-logo { width: min(500px, 78vw); float: right; margin: -22px -12px 20px 36px; filter: drop-shadow(0 34px 52px var(--shadow)); }
-h2 { font-size: clamp(1.9rem, 3.2vw, 2.8rem); letter-spacing: -.015em; font-weight: 800; margin: 62px 0 16px; }
+.hero-logo { width: min(360px, 34vw); float: right; margin: -8px -8px 16px 32px; filter: drop-shadow(0 34px 52px var(--shadow)); }
+h2 { font-size: clamp(1.25rem, 2.2vw, 1.9rem); letter-spacing: -.01em; font-weight: 800; margin: 46px 0 14px; }
 h3 { margin-top: 34px; color: var(--jay-buff); letter-spacing: 0; }
 p, li { line-height: 1.7; color: var(--muted); }
 ul { display: grid; gap: 10px; padding-left: 22px; }
@@ -62,6 +62,53 @@ pre code { background: none; border: 0; padding: 0; }
 .brand-grid, .swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: 22px 0; }
 .card, .swatch { border: 1px solid var(--line); border-radius: 24px; padding: 20px; background: var(--surface); box-shadow: 0 16px 40px rgba(0,0,0,.18); }
 .swatch strong { display: block; margin-top: 72px; }
+.docs-with-toc {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 44px;
+  align-items: start;
+}
+.commands-reference { min-width: 0; }
+.commands-reference h2 {
+  border-top: 1px solid var(--line);
+  padding-top: 42px;
+  scroll-margin-top: 24px;
+}
+.commands-reference h2:first-of-type { border-top: 0; padding-top: 0; }
+.toc {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--surface);
+  padding: 16px;
+  margin-top: 42px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.14);
+}
+.toc strong { display: block; margin: 2px 0 10px; }
+.toc-search { display: block; margin: 0 0 12px; }
+.toc-search span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+.toc-search input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  color: var(--text);
+  padding: 9px 10px;
+  font: inherit;
+}
+.toc-search input::placeholder { color: var(--soft); }
+.toc-links { display: grid; gap: 2px; }
+.toc a {
+  display: block;
+  border-radius: 12px;
+  color: var(--muted);
+  padding: 7px 9px;
+  text-decoration: none;
+}
+.toc a:hover, .toc a[aria-current="page"] { background: var(--surface); color: var(--text); border: 1px solid var(--line); }
 footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--soft); }
 footer span:last-child { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 
@@ -115,5 +162,7 @@ footer span:last-child { display: flex; flex-wrap: wrap; gap: 8px; justify-conte
 @media (max-width: 760px) {
   .site-header, footer { align-items: flex-start; flex-direction: column; }
   nav, footer span:last-child { justify-content: flex-start; }
-  .hero-logo { float: none; display: block; margin: 0 auto 20px; }
+  .docs-with-toc { display: flex; flex-direction: column; }
+  .toc { order: -1; position: static; max-height: none; margin: 0 0 26px; }
+  .hero-logo { float: none; display: block; width: min(260px, 72vw); margin: 0 auto 20px; }
 }

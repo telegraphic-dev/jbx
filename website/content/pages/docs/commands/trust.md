@@ -1,4 +1,5 @@
 ---
+
 title: jbx trust command
 description: Pin, list, remove, or clear trusted hashes for remote scripts.
 ---
@@ -48,6 +49,82 @@ No `--json` mode yet. Trust operations are small and human-auditable; use explic
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx trust`
+
+```text
+Manage trusted remote scripts
+
+Usage: jbx trust <COMMAND>
+
+Commands:
+  add     Trust the current content hash of a remote script URL
+  remove  Remove a trusted remote script URL
+  list    List trusted remote script URLs and hashes
+  clear   Clear all trusted remote script entries
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx trust list`
+
+```text
+List trusted remote script URLs and hashes
+
+Usage: jbx trust list [OPTIONS]
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
+
+### `jbx trust add`
+
+```text
+Trust the current content hash of a remote script URL
+
+Usage: jbx trust add [OPTIONS] <URL>
+
+Arguments:
+  <URL>  Remote http(s) Java source URL
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
+
+### `jbx trust remove`
+
+```text
+Remove a trusted remote script URL
+
+Usage: jbx trust remove [OPTIONS] <URL>
+
+Arguments:
+  <URL>  Remote http(s) Java source URL
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
+
+### `jbx trust clear`
+
+```text
+Clear all trusted remote script entries
+
+Usage: jbx trust clear [OPTIONS]
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
 
 ## Skill
 

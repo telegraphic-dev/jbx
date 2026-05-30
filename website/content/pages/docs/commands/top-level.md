@@ -21,11 +21,18 @@ jbx skill get jbx-check
 ## Common thin entry-point workflows
 
 ```bash
-jbx Hello.java world
-jbx dev.telegraphic:hello-tool:1.0.0 -- --help
+jbx Hello.java --name Jay --verbose
+jbx dev.telegraphic:hello-tool:1.0.0 --help
+jbx dev.telegraphic:hello-tool:1.0.0 -- --literal-double-dash
 jbx skill get jbx-run
 jbx doctor --json
 ```
+
+## Passing arguments
+
+For the top-level shorthand, `jbx` options go before the Java file or Maven coordinate. After the target, arguments belong to the launched program, including options such as `--help` or Picocli flags.
+
+Use an explicit `--` only when the launched program needs to receive a literal double-dash argument.
 
 ## Command pages
 
@@ -48,7 +55,7 @@ jbx doctor --json
 - [`template`](/docs/commands/template/) — List built-in and imported templates for `jbx init`.
 - [`init`](/docs/commands/init/) — Create Java 25+ scripts from built-in or imported templates.
 - [`export`](/docs/commands/export/) — Export local, portable, or native runnable artifacts.
-- [`publish`](/docs/commands/publish/) — Build Maven Central-ready bundles, local served repositories, or Portal uploads from `jbx.json` and sources.
+- [`publish`](/docs/commands/publish/) — Publish Java projects to Maven repositories, including Maven Central.
 - [`install`](/docs/commands/install/) — Install the current project into a Maven repository layout, usually `~/.m2/repository`.
 - [`fmt`](/docs/commands/fmt/) — Format Java files with Palantir Java Format, including Java 25 compact scripts.
 - [`graph`](/docs/commands/graph/) — Dump JavaParser native AST JSON or import it back to Java source.
@@ -65,3 +72,54 @@ jbx doctor --json
 ## JSON and schema
 
 No top-level JSON mode. The top-level entry point forwards humans to common run paths and agents to `jbx skill`. Use dedicated JSON modes such as `jbx skill list --json`, `jbx doctor --json`, `jbx check --json`, `jbx docs --json`, `jbx search --json`, `jbx test --json`, and `jbx rewrite ... --json`.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx`
+
+```text
+jbx: one-stop Java toolbox for scripts, tools, and agents
+
+Usage: jbx [OPTIONS] [SCRIPT] [ARGS]... [COMMAND]
+
+Commands:
+  run       Compile and run a Java source file
+  build     Compile and store script in the cache without running it
+  publish   Prepare Maven Central publishing artifacts
+  install   Install the current project into a Maven repository layout
+  docs      Print agent-friendly documentation for source, directories, or Maven artifacts
+  check     Check Java source files with javac diagnostics and Error Prone by default
+  init      Initialize a Java script
+  cache     Manage compiled script cache
+  trust     Manage trusted remote scripts
+  info      Print parsed JBang directives
+  doctor    Diagnose the local jbx toolchain and a script when provided
+  app       Manage scripts installed as commands on PATH
+  alias     Manage aliases from jbang-catalog.json
+  catalog   Manage external catalogs from jbang-catalog.json
+  export    Export runnable JARs
+  template  List init templates
+  resolve   Resolve Maven dependencies without running
+  fetch     Fetch Maven dependency artifacts and print classpath
+  search    Search Maven Central for artifacts
+  test      Run JUnit tests with the standalone console launcher
+  fmt       Format Java source files with Palantir Java Format
+  graph     Convert Java source to/from JavaParser's native JSON serialization
+  rewrite   Run OpenRewrite recipes against Java source trees
+  skill     Print version-matched agent skills bundled with this jbx release
+  jdk       Manage installed JDKs
+  help      Print this message or the help of the given subcommand(s)
+
+Arguments:
+  [SCRIPT]   Script to run, or Maven coordinates to launch as a Java tool
+  [ARGS]...  Arguments passed to the script/tool when no subcommand is given
+
+Options:
+      --repo <REPOS>           Additional repository for Maven executable shorthand (id=url format or bare URL)
+      --cache-dir <CACHE_DIR>  Override dependency cache directory for Maven executable shorthand
+      --main <MAIN_CLASS>      Main class for Maven executable shorthand instead of java -jar
+  -h, --help                   Print help
+  -V, --version                Print version
+```

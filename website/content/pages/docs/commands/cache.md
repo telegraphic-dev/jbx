@@ -1,4 +1,5 @@
 ---
+
 title: jbx cache command
 description: Inspect or clear compiled-script cache paths and entries.
 ---
@@ -48,6 +49,64 @@ Never clear caches blindly during a debugging task; list first and scope destruc
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx cache`
+
+```text
+Manage compiled script cache
+
+Usage: jbx cache <COMMAND>
+
+Commands:
+  clear  Clear the jbx cache directory
+  path   Print the effective jbx cache directory
+  list   List cached script entries
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx cache path`
+
+```text
+Print the effective jbx cache directory
+
+Usage: jbx cache path [OPTIONS]
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
+
+### `jbx cache list`
+
+```text
+List cached script entries
+
+Usage: jbx cache list [OPTIONS]
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+      --json                   Print cache entries as JSON
+  -h, --help                   Print help
+```
+
+### `jbx cache clear`
+
+```text
+Clear the jbx cache directory
+
+Usage: jbx cache clear [OPTIONS]
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
 
 ## Skill
 

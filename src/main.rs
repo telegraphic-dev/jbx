@@ -3,6 +3,7 @@ use base64::Engine;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::{
     collections::BTreeSet,
+    ffi::OsString,
     fs,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
@@ -48,61 +49,61 @@ struct Cli {
     script: Option<PathBuf>,
 
     /// Arguments passed to the script/tool when no subcommand is given.
-    #[arg(trailing_var_arg = true)]
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Compile and run a Java source file.
+    /// Run Java source or Maven artifact
     Run(RunCommand),
-    /// Compile and store script in the cache without running it.
+    /// Compile Java source without running it
     Build(BuildCommand),
-    /// Prepare Maven Central publishing artifacts.
+    /// Publish Java projects to Maven repositories, including Maven Central.
     Publish(PublishCommand),
     /// Install the current project into a Maven repository layout.
     Install(InstallCommand),
-    /// Print agent-friendly documentation for source, directories, or Maven artifacts.
+    /// Display documentation from Java sources or Maven artifacts.
     Docs(DocsCommand),
-    /// Check Java source files with javac diagnostics and Error Prone by default.
+    /// Diagnose the Java source file for errors
     Check(CheckCommand),
-    /// Initialize a Java script.
+    /// Create Java sources from built-in or imported templates.
     Init(InitCommand),
-    /// Manage compiled script cache.
+    /// Inspect or clear compiled-script cache paths and entries.
     Cache(CacheCommand),
-    /// Manage trusted remote scripts.
+    /// Pin, list, remove, or clear trusted hashes for remote scripts.
     Trust(TrustCommand),
-    /// Print parsed JBang directives.
+    /// Print parsed directives and derived metadata from Java sources.
     Info(InfoCommand),
-    /// Diagnose the local jbx toolchain and a script when provided.
+    /// Verify local jbx installation
     Doctor(DoctorCommand),
-    /// Manage scripts installed as commands on PATH.
+    /// Install, list, or uninstall Java scripts as PATH commands.
     App(AppCommand),
-    /// Manage aliases from jbang-catalog.json.
+    /// Add, remove, and list aliases from nearby jbang-catalog.json files.
     Alias(AliasCommand),
-    /// Manage external catalogs from jbang-catalog.json.
+    /// Add and list external catalogs in jbang-catalog.json.
     Catalog(CatalogCommand),
-    /// Export runnable JARs.
+    /// Export local, portable, or native runnable artifacts.
     Export(ExportCommand),
-    /// List init templates.
+    /// List built-in and imported templates for jbx init.
     Template(TemplateCommand),
-    /// Resolve Maven dependencies without running.
+    /// Resolve Maven coordinates
     Resolve(ResolveCommand),
-    /// Fetch Maven dependency artifacts and print classpath.
+    /// Download artifacts and print classpath or dependency coordinates.
     Fetch(FetchCommand),
-    /// Search Maven Central for artifacts.
+    /// Search Maven Central artifacts
     Search(SearchCommand),
-    /// Run JUnit tests with the standalone console launcher.
+    /// Run JUnit tests
     Test(TestCommand),
-    /// Format Java source files with Palantir Java Format.
+    /// Format Java files with Palantir Java Format.
     Fmt(FmtCommand),
-    /// Convert Java source to/from JavaParser's native JSON serialization
+    /// Dump JavaParser native AST JSON or import it back to Java source.
     Graph(GraphCommand),
-    /// Run OpenRewrite recipes against Java source trees.
+    /// Discover OpenRewrite modules and recipes and preview or apply them
     Rewrite(RewriteCommand),
-    /// Print version-matched agent skills bundled with this jbx release.
+    /// List and print version-matched bundled agent skills.
     Skill(SkillCommand),
-    /// Manage installed JDKs.
+    /// List, install, and locate JDKs used by jbx.
     Jdk(JdkCommand),
 }
 
@@ -7545,144 +7546,353 @@ fn should_run_as_maven_tool_shorthand(script: &Path) -> bool {
     matches!(parts.len(), 2..=4) && parts.iter().all(|part| !part.is_empty())
 }
 
+fn normalized_cli_args() -> Vec<OsString> {
+    normalize_cli_args(std::env::args_os().collect())
+}
+
+fn normalize_cli_args(args: Vec<OsString>) -> Vec<OsString> {
+    if args.len() <= 2 || args.iter().any(|arg| arg == "--") {
+        return args;
+    }
+    if args.get(1).is_some_and(|arg| arg == "run") {
+        return insert_separator_after_run_script(args);
+    }
+    insert_separator_after_top_level_target(args)
+}
+
+fn option_takes_value(arg: &str, value_options: &[&str]) -> bool {
+    value_options
+        .iter()
+        .any(|option| arg == *option || arg.starts_with(&format!("{option}=")))
+}
+
+fn insert_separator_after_top_level_target(args: Vec<OsString>) -> Vec<OsString> {
+    const SUBCOMMANDS: &[&str] = &[
+        "run", "build", "publish", "install", "docs", "check", "init", "cache", "trust", "info",
+        "doctor", "app", "alias", "catalog", "export", "template", "resolve", "fetch", "search",
+        "test", "fmt", "graph", "rewrite", "skill", "jdk", "help",
+    ];
+    const TOP_LEVEL_VALUE_OPTIONS: &[&str] = &["--repo", "--repos", "--cache-dir", "--main"];
+
+    let mut skip_value = false;
+    for i in 1..args.len() {
+        let value = args[i].to_string_lossy();
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if option_takes_value(&value, TOP_LEVEL_VALUE_OPTIONS) {
+            skip_value = !value.contains('=');
+            continue;
+        }
+        if value.starts_with('-') {
+            continue;
+        }
+        if SUBCOMMANDS.contains(&value.as_ref()) {
+            return args;
+        }
+
+        let target = Path::new(value.as_ref());
+        let allow_post_target_options = should_run_as_maven_tool_shorthand(target);
+        return insert_separator_after_target(
+            args,
+            i,
+            allow_post_target_options,
+            TOP_LEVEL_VALUE_OPTIONS,
+        );
+    }
+    args
+}
+
+fn insert_separator_after_run_script(args: Vec<OsString>) -> Vec<OsString> {
+    const RUN_VALUE_OPTIONS: &[&str] = &[
+        "--deps",
+        "--repo",
+        "--repos",
+        "--source",
+        "--sources",
+        "--files",
+        "--file",
+        "--class-path",
+        "--cp",
+        "--javac-option",
+        "--compile-option",
+        "--runtime-option",
+        "--java-option",
+        "--java",
+        "--javaagent",
+        "--main",
+        "--cache-dir",
+    ];
+
+    let mut skip_value = false;
+    for i in 2..args.len() {
+        let value = args[i].to_string_lossy();
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if value == "--trust" {
+            continue;
+        }
+        if option_takes_value(&value, RUN_VALUE_OPTIONS) {
+            skip_value = !value.contains('=');
+            continue;
+        }
+        if value.starts_with('-') {
+            return args;
+        }
+        return insert_separator_after_target(args, i, false, &[]);
+    }
+    args
+}
+
+fn insert_separator_after_target(
+    args: Vec<OsString>,
+    target_index: usize,
+    allow_post_target_options: bool,
+    post_target_value_options: &[&str],
+) -> Vec<OsString> {
+    if target_index + 1 >= args.len() {
+        return args;
+    }
+    let mut skip_value = false;
+    let mut has_program_option = false;
+    for value in args
+        .iter()
+        .skip(target_index + 1)
+        .map(|arg| arg.to_string_lossy())
+    {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if allow_post_target_options && option_takes_value(&value, post_target_value_options) {
+            skip_value = !value.contains('=');
+            continue;
+        }
+        if value.starts_with('-') {
+            has_program_option = true;
+            break;
+        }
+    }
+    if !has_program_option {
+        return args;
+    }
+
+    let mut out = Vec::with_capacity(args.len() + 1);
+    for (i, arg) in args.into_iter().enumerate() {
+        out.push(arg);
+        if i == target_index {
+            out.push(OsString::from("--"));
+        }
+    }
+    out
+}
+
 struct SkillEntry {
     name: &'static str,
     description: &'static str,
-    content: &'static str,
+    page: &'static str,
 }
 
 const BUNDLED_SKILLS: &[SkillEntry] = &[
     SkillEntry {
         name: "jbx",
         description: "Single agent-friendly entry point to the Java ecosystem.",
-        content: include_str!("../skill-data/jbx/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/top-level.md"),
     },
     SkillEntry {
         name: "jbx-run",
         description: "Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.",
-        content: include_str!("../skill-data/jbx-run/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/run.md"),
     },
     SkillEntry {
         name: "jbx-build",
         description: "Compile a script into the jbx cache without running it.",
-        content: include_str!("../skill-data/jbx-build/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/build.md"),
     },
     SkillEntry {
         name: "jbx-check",
         description: "Check Java source with structured diagnostics.",
-        content: include_str!("../skill-data/jbx-check/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/check.md"),
     },
     SkillEntry {
         name: "jbx-test",
         description: "Run JUnit tests with optional JaCoCo coverage.",
-        content: include_str!("../skill-data/jbx-test/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/test.md"),
     },
     SkillEntry {
         name: "jbx-docs",
         description: "Generate Markdown or JSON documentation from local sources or Maven artifacts.",
-        content: include_str!("../skill-data/jbx-docs/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/docs.md"),
     },
     SkillEntry {
         name: "jbx-doctor",
         description: "Diagnose JDKs, Maven, caches, trust, dependencies, and optional native/publish tools.",
-        content: include_str!("../skill-data/jbx-doctor/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/doctor.md"),
     },
     SkillEntry {
         name: "jbx-rewrite",
         description: "Preview/apply OpenRewrite recipes and discover modules or recipes.",
-        content: include_str!("../skill-data/jbx-rewrite/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/rewrite.md"),
     },
     SkillEntry {
         name: "jbx-search",
         description: "Search Maven Central artifacts by text or coordinates.",
-        content: include_str!("../skill-data/jbx-search/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/search.md"),
     },
     SkillEntry {
         name: "jbx-resolve",
         description: "Resolve Maven coordinates to dependency coordinates or classpaths.",
-        content: include_str!("../skill-data/jbx-resolve/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/resolve.md"),
     },
     SkillEntry {
         name: "jbx-fetch",
         description: "Download artifacts and print classpath or dependency coordinates.",
-        content: include_str!("../skill-data/jbx-fetch/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/fetch.md"),
     },
     SkillEntry {
         name: "jbx-info",
         description: "Print parsed directives and derived metadata from Java scripts.",
-        content: include_str!("../skill-data/jbx-info/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/info.md"),
     },
     SkillEntry {
         name: "jbx-cache",
         description: "Inspect or clear compiled-script cache paths and entries.",
-        content: include_str!("../skill-data/jbx-cache/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/cache.md"),
     },
     SkillEntry {
         name: "jbx-trust",
         description: "Pin, list, remove, or clear trusted hashes for remote scripts.",
-        content: include_str!("../skill-data/jbx-trust/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/trust.md"),
     },
     SkillEntry {
         name: "jbx-app",
         description: "Install, list, or uninstall Java scripts as PATH commands.",
-        content: include_str!("../skill-data/jbx-app/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/app.md"),
     },
     SkillEntry {
         name: "jbx-alias",
         description: "Add, remove, and list aliases from `jbang-catalog.json`.",
-        content: include_str!("../skill-data/jbx-alias/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/alias.md"),
     },
     SkillEntry {
         name: "jbx-catalog",
         description: "Add and list external catalogs in `jbang-catalog.json`.",
-        content: include_str!("../skill-data/jbx-catalog/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/catalog.md"),
     },
     SkillEntry {
         name: "jbx-template",
         description: "List built-in and imported templates for `jbx init`.",
-        content: include_str!("../skill-data/jbx-template/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/template.md"),
     },
     SkillEntry {
         name: "jbx-init",
         description: "Create Java 25+ scripts from built-in or imported templates.",
-        content: include_str!("../skill-data/jbx-init/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/init.md"),
     },
     SkillEntry {
         name: "jbx-export",
         description: "Export local, portable, or native runnable artifacts.",
-        content: include_str!("../skill-data/jbx-export/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/export.md"),
     },
     SkillEntry {
         name: "jbx-publish",
         description: "Build Maven-ready bundles, local served repositories, or Portal uploads.",
-        content: include_str!("../skill-data/jbx-publish/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/publish.md"),
     },
     SkillEntry {
         name: "jbx-install",
         description: "Install the current project into a Maven repository layout.",
-        content: include_str!("../skill-data/jbx-install/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/install.md"),
     },
     SkillEntry {
         name: "jbx-fmt",
         description: "Format Java files with Palantir Java Format.",
-        content: include_str!("../skill-data/jbx-fmt/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/fmt.md"),
     },
     SkillEntry {
         name: "jbx-graph",
         description: "Dump JavaParser native AST JSON or import it back to Java source.",
-        content: include_str!("../skill-data/jbx-graph/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/graph.md"),
     },
     SkillEntry {
         name: "jbx-skill",
         description: "List and print version-matched bundled agent skills.",
-        content: include_str!("../skill-data/jbx-skill/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/skill.md"),
     },
     SkillEntry {
         name: "jbx-jdk",
         description: "List, install, and locate JDKs used by jbx.",
-        content: include_str!("../skill-data/jbx-jdk/SKILL.md"),
+        page: include_str!("../website/content/pages/docs/commands/jdk.md"),
     },
 ];
+
+fn skill_content_from_page(skill: &SkillEntry) -> String {
+    let body = strip_markdown_frontmatter(skill.page);
+    let body = strip_markdown_section(body, "Skill");
+    let body = strip_skill_bootstrap(&body);
+    format!(
+        "---\nname: {}\ndescription: {}\n---\n\n{}",
+        skill.name,
+        skill.description,
+        body.trim_end()
+    ) + "\n"
+}
+
+fn strip_markdown_frontmatter(markdown: &str) -> &str {
+    markdown
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("---"))
+        .map(|(_, body)| body.trim_start())
+        .unwrap_or(markdown)
+}
+
+fn strip_markdown_section(markdown: &str, heading: &str) -> String {
+    let target = format!("## {heading}");
+    let mut output = Vec::new();
+    let mut skipping = false;
+    for line in markdown.lines() {
+        if line == target {
+            skipping = true;
+            continue;
+        }
+        if skipping && line.starts_with("## ") {
+            skipping = false;
+        }
+        if !skipping {
+            output.push(line);
+        }
+    }
+    output.join("\n")
+}
+
+fn strip_skill_bootstrap(markdown: &str) -> String {
+    let mut lines = Vec::new();
+    let mut skip_empty_after_removed = false;
+    for line in markdown.lines() {
+        if line.contains("jbx skill get") {
+            skip_empty_after_removed = true;
+            continue;
+        }
+        if skip_empty_after_removed && line.trim().is_empty() {
+            skip_empty_after_removed = false;
+            continue;
+        }
+        skip_empty_after_removed = false;
+        let line = line
+            .replacen("2. Run the command", "1. Run the command", 1)
+            .replacen("3. Prefer JSON", "2. Prefer JSON", 1)
+            .replacen("4. Verify", "3. Verify", 1);
+        lines.push(line);
+    }
+    let mut text = lines.join("\n");
+    while text.contains("\n\n\n") {
+        text = text.replace("\n\n\n", "\n\n");
+    }
+    text
+}
 
 fn run_skill(cmd: SkillCommand) -> Result<i32> {
     match cmd.command {
@@ -7714,8 +7924,9 @@ fn run_skill(cmd: SkillCommand) -> Result<i32> {
                 .iter()
                 .find(|skill| skill.name == name)
                 .with_context(|| format!("unknown bundled skill: {name}"))?;
-            print!("{}", skill.content);
-            if !skill.content.ends_with('\n') {
+            let content = skill_content_from_page(skill);
+            print!("{content}");
+            if !content.ends_with('\n') {
                 println!();
             }
             Ok(0)
@@ -8232,7 +8443,7 @@ fn is_probably_remote_url(value: &str) -> bool {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(normalized_cli_args());
     let code = match cli.command {
         Some(Commands::Run(cmd)) => run_java(apply_alias_to_run(RunOptions {
             script: cmd.script,

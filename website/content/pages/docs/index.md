@@ -1,18 +1,18 @@
 ---
 title: jbx docs
-description: Start points for developers and agents using jbx.
+description: Start points for using jbx.
 ---
 
 # Documentation
 
-Use this site as the human reference for the installed CLI. Use `jbx skill list` inside automation for version-matched agent guidance.
+Use this site for the installed CLI: install steps, command behavior, examples, schemas, and safe automation patterns.
 
 ## Start here
 
 - [Getting started](/docs/getting-started/) covers install and first commands.
 - [Command reference](/docs/commands/) gives every command its own page.
 - [JSON schemas](/docs/schemas/) documents structured output contracts.
-- [Agent guide](/docs/agent-guide/) explains safe automation patterns.
+- [Automation guide](/docs/agent-guide/) explains safe unattended usage patterns.
 
 ## Core loop
 

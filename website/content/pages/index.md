@@ -1,15 +1,14 @@
 ---
-title: jbx — agent-friendly Java entry point
-description: Single agent-friendly entry point to the Java ecosystem.
+title: jbx — Java toolbox for scripts, tools, and automation
+description: One practical CLI for Java scripts, Maven tools, tests, formatting, publishing, dependency lookup, documentation, diagnostics, and JDK handling.
 ---
 
-# Single agent-friendly entry point to the Java ecosystem
+# Java tools in one small CLI
 
-`jbx` gives developers and coding agents one practical CLI for Java scripts, Maven tools, tests, formatting, publishing, dependency lookup, documentation, diagnostics, and JDK handling.
+`jbx` runs Java scripts, launches Maven tools, checks code, runs tests, formats sources, inspects dependencies, publishes artifacts, and documents APIs from one command.
 
 ```bash
 jbx Hello.java world
-jbx dev.telegraphic:hello-tool:1.0.0 -- --help
 jbx check src --json
 jbx docs com.fasterxml.jackson.core:jackson-databind --json
 jbx doctor Hello.java --json
@@ -18,9 +17,9 @@ jbx doctor Hello.java --json
 ## What it gives you
 
 - **One entry point.** Run scripts, launch Maven tools, inspect dependencies, test, format, export, publish, and diagnose without switching toolchains.
-- **Agent-ready output.** Commands that produce facts expose JSON modes, and the matching schemas live with the docs.
-- **Version-matched skills.** `jbx skill list` and `jbx skill get <name>` ship command guidance with the binary, so agents do not rely on stale web snippets.
-- **Human-readable docs.** Every command has a short page with examples, agent notes, and structured-output expectations.
+- **Structured output.** Commands that produce facts expose JSON modes, and the matching schemas live with the docs.
+- **Bundled command guidance.** `jbx skill list` and `jbx skill get <name>` ship detailed command docs with the binary, so automation can use the same documentation offline.
+- **Real examples.** Every command page explains arguments, common workflows, JSON output, and concrete command lines.
 
 ## Start here
 

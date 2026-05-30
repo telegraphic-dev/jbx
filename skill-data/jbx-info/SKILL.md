@@ -1,64 +1,401 @@
 ---
 name: jbx-info
-description: Print parsed directives and derived metadata from Java scripts.
+description: Print parsed directives and derived metadata from Java sources.
 ---
 
-# jbx-info
+# `info`
 
 Print parsed directives and derived metadata from Java scripts.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-info
-```
-
-## Use when
+## When to use it
 
 - Read `//DEPS` before modifying a script.
 - Check which Java version or main class a script declares.
 - Extract docs/cache metadata for packaging or publishing workflows.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx info deps Hello.java
 jbx info repos Hello.java
 jbx info java Hello.java
 jbx info directives Hello.java
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `info` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Read `//DEPS` before modifying a script.
-- Check which Java version or main class a script declares.
-- Extract docs/cache metadata for packaging or publishing workflows.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Prefer `info` over ad-hoc parsing of `//` directives. If multiple facts are needed, call the specific subcommands and keep each output scoped.
 
-## Structured output
+## JSON and schema
 
 No global `--json` mode yet; subcommands return focused text values. Use it for deterministic extraction instead of regexing source.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx info`
+
+```text
+Print parsed JBang directives
+
+Usage: jbx info <COMMAND>
+
+Commands:
+  classpath        Print classpath used by the script
+  tools            Print a json description for tools/IDEs
+  docs             Print documentation references declared by the script
+  cache            Print the effective jbx cache directory
+  main             Print effective main class
+  java             Print requested Java version
+  description      Print script description
+  gav              Print Maven GAV
+  module           Print Java module name
+  deps             Print dependency directives
+  repos            Print repository directives
+  sources          Print source directives
+  files            Print file/resource directives
+  compile-options  Print compile option directives
+  runtime-options  Print runtime/java option directives
+  native-options   Print native option directives
+  javaagents       Print java agent directives
+  manifest         Print manifest directives
+  directives       Print parsed JBang directives
+  help             Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info classpath`
+
+```text
+Print classpath used by the script
+
+Usage: jbx info classpath [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+      --deps-only
+          Only include dependency/classpath entries, not compiled script classes
+      --deps <DEPS>
+          Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>
+          Additional repository, same shape as //REPOS
+      --source <SOURCES>
+          Additional source file, same shape as //SOURCES
+      --files <FILES>
+          Additional file/resource, same shape as //FILES
+      --class-path <CLASSPATH>
+          Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>
+          Additional javac option
+      --runtime-option <RUNTIME_OPTIONS>
+          Additional java runtime option, same shape as //JAVA_OPTIONS
+      --java <JAVA_VERSION>
+          Override //JAVA requested version
+      --javaagent <JAVA_AGENTS>
+          Additional java agent, same shape as //JAVAAGENT
+      --main <MAIN_CLASS>
+          Override //MAIN / inferred class name
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+  -h, --help
+          Print help
+```
+
+### `jbx info tools`
+
+```text
+Print a json description for tools/IDEs
+
+Usage: jbx info tools [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+      --select <SELECT>
+          Select a single field from the tools JSON payload
+      --deps <DEPS>
+          Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>
+          Additional repository, same shape as //REPOS
+      --source <SOURCES>
+          Additional source file, same shape as //SOURCES
+      --files <FILES>
+          Additional file/resource, same shape as //FILES
+      --class-path <CLASSPATH>
+          Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>
+          Additional javac option
+      --runtime-option <RUNTIME_OPTIONS>
+          Additional java runtime option, same shape as //JAVA_OPTIONS
+      --java <JAVA_VERSION>
+          Override //JAVA requested version
+      --javaagent <JAVA_AGENTS>
+          Additional java agent, same shape as //JAVAAGENT
+      --main <MAIN_CLASS>
+          Override //MAIN / inferred class name
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+  -h, --help
+          Print help
+```
+
+### `jbx info docs`
+
+```text
+Print documentation references declared by the script
+
+Usage: jbx info docs <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info cache`
+
+```text
+Print the effective jbx cache directory
+
+Usage: jbx info cache [OPTIONS]
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
+
+### `jbx info main`
+
+```text
+Print effective main class
+
+Usage: jbx info main <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info java`
+
+```text
+Print requested Java version
+
+Usage: jbx info java <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info description`
+
+```text
+Print script description
+
+Usage: jbx info description <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info gav`
+
+```text
+Print Maven GAV
+
+Usage: jbx info gav <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info module`
+
+```text
+Print Java module name
+
+Usage: jbx info module <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info deps`
+
+```text
+Print dependency directives
+
+Usage: jbx info deps <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info repos`
+
+```text
+Print repository directives
+
+Usage: jbx info repos <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info sources`
+
+```text
+Print source directives
+
+Usage: jbx info sources <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info files`
+
+```text
+Print file/resource directives
+
+Usage: jbx info files <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info compile-options`
+
+```text
+Print compile option directives
+
+Usage: jbx info compile-options <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info runtime-options`
+
+```text
+Print runtime/java option directives
+
+Usage: jbx info runtime-options <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info native-options`
+
+```text
+Print native option directives
+
+Usage: jbx info native-options <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info javaagents`
+
+```text
+Print java agent directives
+
+Usage: jbx info javaagents <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info manifest`
+
+```text
+Print manifest directives
+
+Usage: jbx info manifest <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx info directives`
+
+```text
+Print parsed JBang directives
+
+Usage: jbx info directives <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+  -h, --help  Print help
+```

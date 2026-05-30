@@ -1,6 +1,7 @@
 ---
+
 title: jbx docs command
-description: Generate Markdown or JSON documentation from local Java sources, directories, docs sidecars, or Maven artifacts.
+description: Display documentation from Java sources or Maven artifacts.
 ---
 
 # `docs`
@@ -48,6 +49,28 @@ Use docs before guessing APIs. Prefer JSON when extracting types/methods program
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx docs`
+
+```text
+Print agent-friendly documentation for source, directories, or Maven artifacts
+
+Usage: jbx docs [OPTIONS] <TARGET>
+
+Arguments:
+  <TARGET>  Maven GAV, Java source file, docs sidecar, or directory to document
+
+Options:
+      --json                   Print JSON instead of Markdown
+      --repo <REPOS>           Additional repository for remote Maven docs sidecars (id=url format or bare URL)
+      --type <TYPES>           Limit structured output to matching type names. Repeatable; accepts simple or fully-qualified names
+      --cache-dir <CACHE_DIR>  Override remote docs cache directory
+  -h, --help                   Print help
+```
 
 ## Skill
 

@@ -1,63 +1,71 @@
 ---
 name: jbx-docs
-description: Generate Markdown or JSON documentation from local Java sources, directories, docs sidecars, or Maven artifacts.
+description: Display documentation from Java sources or Maven artifacts.
 ---
 
-# jbx-docs
+# `docs`
 
 Generate Markdown or JSON documentation from local Java sources, directories, docs sidecars, or Maven artifacts.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-docs
-```
-
-## Use when
+## When to use it
 
 - Inspect an unfamiliar dependency before writing integration code.
 - Publish or consume sidecar docs that agents can read without decompiling jars.
 - Generate local API notes for a small script or library as part of CI.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx docs src/main/java
 jbx docs com.fasterxml.jackson.core:jackson-databind:2.17.2 --json
 jbx docs docs/my-library-jbx-docs.json
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `docs` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Inspect an unfamiliar dependency before writing integration code.
-- Publish or consume sidecar docs that agents can read without decompiling jars.
-- Generate local API notes for a small script or library as part of CI.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Use docs before guessing APIs. Prefer JSON when extracting types/methods programmatically; use Markdown for human handoff. If a Maven artifact has a sidecar, trust the sidecar version that matches the artifact coordinate.
 
-## Structured output
+## JSON and schema
 
 `--json` follows the published docs sidecar schema in `/docs/jbx-docs-schema/` and is summarized at `/docs/schemas/#docs-json`.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx docs`
+
+```text
+Print agent-friendly documentation for source, directories, or Maven artifacts
+
+Usage: jbx docs [OPTIONS] <TARGET>
+
+Arguments:
+  <TARGET>  Maven GAV, Java source file, docs sidecar, or directory to document
+
+Options:
+      --json                   Print JSON instead of Markdown
+      --repo <REPOS>           Additional repository for remote Maven docs sidecars (id=url format or bare URL)
+      --type <TYPES>           Limit structured output to matching type names. Repeatable; accepts simple or fully-qualified names
+      --cache-dir <CACHE_DIR>  Override remote docs cache directory
+  -h, --help                   Print help
+```

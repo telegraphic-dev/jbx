@@ -1,65 +1,128 @@
 ---
 name: jbx-test
-description: Run JUnit tests with the standalone console launcher; optionally collect JaCoCo coverage.
+description: Run JUnit tests
 ---
 
-# jbx-test
+# `test`
 
 Run JUnit tests with the standalone console launcher; optionally collect JaCoCo coverage.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-test
-```
-
-## Use when
+## When to use it
 
 - Run a small Java kata or library test suite without creating a full build file.
 - Give an agent failing test names and stack traces in a parseable shape.
 - Collect coverage during a refactor to prove the edited code path is exercised.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx test src/test/java --json
-jbx test tests/CalculatorTest.java -- --select-method CalculatorTest#adds --json
+jbx test --json tests/CalculatorTest.java -- --select-method CalculatorTest#adds
 jbx test --coverage --json
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `test` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Run a small Java kata or library test suite without creating a full build file.
-- Give an agent failing test names and stack traces in a parseable shape.
-- Collect coverage during a refactor to prove the edited code path is exercised.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Start with focused tests when repairing a failure, then broaden to the directory or suite. Preserve non-zero exits for failed tests; do not hide failures behind “JSON parsed successfully”.
 
-## Structured output
+## JSON and schema
 
 `--json` reports status, selected tests, failures, console XML paths, and optional coverage paths/counters. Website schema: `/docs/schemas/#test-json`.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
 
-> Tip: for exact release behavior, rerun `jbx skill get jbx-test` from the target machine.
+### `jbx test`
+
+```text
+Run JUnit tests with the standalone console launcher
+
+Usage: jbx test [OPTIONS] [SCRIPT] [ARGS]...
+
+Arguments:
+  [SCRIPT]
+          Java test source file or directory. Defaults to the current directory
+
+          [default: .]
+
+  [ARGS]...
+          Extra arguments passed to the JUnit ConsoleLauncher after defaults
+
+Options:
+      --json
+          Print converted JUnit XML report as JSON
+
+      --xml
+          Print the generated JUnit XML report
+
+      --coverage
+          Collect JaCoCo coverage data in target/jacoco.exec
+
+      --jacoco-version <JACOCO_VERSION>
+          JaCoCo agent version to use when --coverage is enabled.
+
+          Defaults to the built-in version (0.8.13).
+
+      --junit-version <JUNIT_VERSION>
+          JUnit Platform Console Standalone version to use.
+
+          Defaults to the cached latest Maven Central release, refreshed periodically.
+
+      --deps <DEPS>
+          Additional dependency coordinates, same shape as //DEPS
+
+      --repo <REPOS>
+          Additional repository, same shape as //REPOS
+
+      --source <SOURCES>
+          Additional source file, same shape as //SOURCES
+
+      --files <FILES>
+          Additional file/resource, same shape as //FILES
+
+      --class-path <CLASSPATH>
+          Additional classpath entries
+
+      --javac-option <JAVAC_OPTIONS>
+          Additional javac option
+
+      --runtime-option <RUNTIME_OPTIONS>
+          Additional java runtime option for the JUnit launcher JVM
+
+      --java <JAVA_VERSION>
+          Override //JAVA requested version
+
+      --javaagent <JAVA_AGENTS>
+          Additional java agent, same shape as //JAVAAGENT
+
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+
+      --trust
+          Trust this remote script content hash before testing
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+> For exact behavior, prefer the skill bundled with the `jbx` binary on the machine running the task.

@@ -1,4 +1,5 @@
 ---
+
 title: jbx graph command
 description: Dump JavaParser native AST JSON or import it back to Java source.
 ---
@@ -48,6 +49,57 @@ Prefer AST operations for structural changes, but verify with `jbx check --json`
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx graph`
+
+```text
+Convert Java source to/from JavaParser's native JSON serialization
+
+Usage: jbx graph <COMMAND>
+
+Commands:
+  dump    Convert a Java source file to JavaParser's native JSON serialization
+  import  Convert JavaParser's native JSON serialization back to Java source
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx graph dump`
+
+```text
+Convert a Java source file to JavaParser's native JSON serialization
+
+Usage: jbx graph dump [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file
+
+Options:
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
+
+### `jbx graph import`
+
+```text
+Convert JavaParser's native JSON serialization back to Java source
+
+Usage: jbx graph import [OPTIONS] <JSON>
+
+Arguments:
+  <JSON>  JavaParser JSON file
+
+Options:
+  -o, --output <OUTPUT>        Write Java source to this file instead of stdout
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -h, --help                   Print help
+```
 
 ## Skill
 

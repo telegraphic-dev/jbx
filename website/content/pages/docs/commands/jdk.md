@@ -1,4 +1,5 @@
 ---
+
 title: jbx jdk command
 description: List, install, and locate JDKs used by jbx.
 ---
@@ -48,6 +49,66 @@ No `--json` mode yet. Use `jbx doctor --json` for structured environment checks 
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx jdk`
+
+```text
+Manage installed JDKs
+
+Usage: jbx jdk <COMMAND>
+
+Commands:
+  list     List discovered and installed JDKs
+  install  Install a JDK from Adoptium (Eclipse Temurin)
+  home     Show JDK home directory for a given version
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx jdk list`
+
+```text
+List discovered and installed JDKs
+
+Usage: jbx jdk list
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx jdk install`
+
+```text
+Install a JDK from Adoptium (Eclipse Temurin)
+
+Usage: jbx jdk install <VERSION>
+
+Arguments:
+  <VERSION>  JDK version to install (e.g. 21, 25, 25+)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx jdk home`
+
+```text
+Show JDK home directory for a given version
+
+Usage: jbx jdk home [VERSION]
+
+Arguments:
+  [VERSION]  JDK version (defaults to 25) [default: 25]
+
+Options:
+  -h, --help  Print help
+```
 
 ## Skill
 

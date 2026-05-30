@@ -1,65 +1,103 @@
 ---
 name: jbx-catalog
-description: Add and list external catalogs in `jbang-catalog.json`.
+description: Add and list external catalogs in jbang-catalog.json.
 ---
 
-# jbx-catalog
+# `catalog`
 
 Add and list external catalogs in `jbang-catalog.json`.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-catalog
-```
-
-## Use when
+## When to use it
 
 - Share common script aliases across repositories.
 - Inspect imported catalogs before resolving an alias.
 - Add a team catalog during project setup.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx catalog list --json
 jbx catalog add team https://example.com/jbang-catalog.json
 jbx catalog add local ./tools/jbang-catalog.json
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `catalog` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Share common script aliases across repositories.
-- Inspect imported catalogs before resolving an alias.
-- Add a team catalog during project setup.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Catalog changes affect command discovery. List first, avoid duplicate names, and prefer pinned/reviewed URLs over random raw links.
 
-## Structured output
+## JSON and schema
 
 `jbx catalog list --json` returns catalog names, URLs, and local resolution details. Website schema: `/docs/schemas/#catalog-json`.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
 
-> Tip: for exact release behavior, rerun `jbx skill get jbx-catalog` from the target machine.
+### `jbx catalog`
+
+```text
+Manage external catalogs from jbang-catalog.json
+
+Usage: jbx catalog <COMMAND>
+
+Commands:
+  add   Add an external catalog reference
+  list  List external catalog references
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx catalog list`
+
+```text
+List external catalog references
+
+Usage: jbx catalog list [OPTIONS]
+
+Options:
+      --json  Print JSON instead of tab-separated text
+  -h, --help  Print help
+```
+
+### `jbx catalog add`
+
+```text
+Add an external catalog reference
+
+Usage: jbx catalog add [OPTIONS] <NAME> <CATALOG_REF>
+
+Arguments:
+  <NAME>         Catalog name
+  <CATALOG_REF>  Catalog path, URL, or directory
+
+Options:
+  -g, --global                     Use the global user catalog file (~/.jbang/jbang-catalog.json)
+  -f, --file <FILE>                Path to the catalog file or directory to use
+      --description <DESCRIPTION>  Description for the catalog
+      --import                     Import aliases and templates from this catalog into local lookup
+      --force                      Force overwrite of an existing catalog reference
+  -h, --help                       Print help
+```
+
+> For exact behavior, prefer the skill bundled with the `jbx` binary on the machine running the task.

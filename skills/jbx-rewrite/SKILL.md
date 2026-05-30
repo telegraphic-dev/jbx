@@ -1,66 +1,193 @@
 ---
 name: jbx-rewrite
-description: Preview or apply OpenRewrite recipes with jbx-managed dependencies and JDKs; discover modules and recipes.
+description: Discover OpenRewrite modules and recipes and preview or apply them
 ---
 
-# jbx-rewrite
+# `rewrite`
 
 Preview or apply OpenRewrite recipes with jbx-managed dependencies and JDKs; discover modules and recipes.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-rewrite
-```
-
-## Use when
+## When to use it
 
 - Preview a modernization recipe and review the patch before touching files.
 - Discover which recipe module contains a migration an agent wants to run.
 - Apply a mechanical cleanup after tests already cover the behavior.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx rewrite modules --search spring --json
 jbx rewrite recipes org.openrewrite.recipe:rewrite-testing-frameworks:3.8.0 --detail --json
 jbx rewrite patch --recipe org.openrewrite.java.format.AutoFormat --source src/main/java --json
 jbx rewrite apply --recipe org.openrewrite.java.format.AutoFormat --source src/main/java --json
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `rewrite` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Preview a modernization recipe and review the patch before touching files.
-- Discover which recipe module contains a migration an agent wants to run.
-- Apply a mechanical cleanup after tests already cover the behavior.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Default to `patch`, not `apply`. Treat `apply` as a mutating operation that needs an explicit task. After applying, run `jbx check --json` and relevant tests.
 
-## Structured output
+## JSON and schema
 
 JSON modes exist for `patch`, `apply`, `modules`, and `recipes`. Schemas are summarized at `/docs/schemas/#rewrite-json`.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
 
-> Tip: for exact release behavior, rerun `jbx skill get jbx-rewrite` from the target machine.
+### `jbx rewrite`
+
+```text
+Run OpenRewrite recipes against Java source trees
+
+Usage: jbx rewrite <COMMAND>
+
+Commands:
+  apply    Apply OpenRewrite recipes and modify sources
+  patch    Preview OpenRewrite recipes and write rewrite/rewrite.patch without modifying sources
+  modules  Search Maven Central for OpenRewrite modules
+  recipes  List or search recipes available from an OpenRewrite module
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx rewrite patch`
+
+```text
+Preview OpenRewrite recipes and write rewrite/rewrite.patch without modifying sources
+
+Usage: jbx rewrite patch [OPTIONS]
+
+Options:
+      --recipe <RECIPES>
+          OpenRewrite recipe to run (short alias or fully-qualified recipe name). Repeatable and comma-splittable
+      --module <MODULES>
+          OpenRewrite module to add (short name for org.openrewrite:rewrite-*, or full GAV). Repeatable and comma-splittable
+      --source <SOURCES>
+          Java source file or directory. Repeatable; defaults to the current directory
+      --option <OPTIONS>
+          Recipe option as key=value. For multiple recipes, use RecipeName.key=value
+      --report <REPORT>
+          Report directory for rewrite.patch [default: rewrite]
+      --json
+          Print JSON summary after the human summary
+      --fail-on-changes
+          Exit with code 2 when recipes would make changes
+      --no-fail-on-invalid-recipes
+          Continue when OpenRewrite reports invalid active recipes
+      --cache-dir <CACHE_DIR>
+          Override dependency/helper cache directory
+      --repo <REPOS>
+          Additional repository for recipe modules
+      --rewrite-version <REWRITE_VERSION>
+          OpenRewrite version for built-in modules [default: 8.56.1]
+  -h, --help
+          Print help
+```
+
+### `jbx rewrite apply`
+
+```text
+Apply OpenRewrite recipes and modify sources
+
+Usage: jbx rewrite apply [OPTIONS]
+
+Options:
+      --recipe <RECIPES>
+          OpenRewrite recipe to run (short alias or fully-qualified recipe name). Repeatable and comma-splittable
+      --module <MODULES>
+          OpenRewrite module to add (short name for org.openrewrite:rewrite-*, or full GAV). Repeatable and comma-splittable
+      --source <SOURCES>
+          Java source file or directory. Repeatable; defaults to the current directory
+      --option <OPTIONS>
+          Recipe option as key=value. For multiple recipes, use RecipeName.key=value
+      --report <REPORT>
+          Report directory for rewrite.patch [default: rewrite]
+      --json
+          Print JSON summary after the human summary
+      --fail-on-changes
+          Exit with code 2 when recipes would make changes
+      --no-fail-on-invalid-recipes
+          Continue when OpenRewrite reports invalid active recipes
+      --cache-dir <CACHE_DIR>
+          Override dependency/helper cache directory
+      --repo <REPOS>
+          Additional repository for recipe modules
+      --rewrite-version <REWRITE_VERSION>
+          OpenRewrite version for built-in modules [default: 8.56.1]
+  -h, --help
+          Print help
+```
+
+### `jbx rewrite modules`
+
+```text
+Search Maven Central for OpenRewrite modules
+
+Usage: jbx rewrite modules [OPTIONS]
+
+Options:
+      --search <SEARCH>
+          Filter Maven Central modules by recipe/module name
+      --group <GROUPS>
+          Maven groupId to search. Defaults to org.openrewrite.recipe and org.openrewrite
+      --limit <LIMIT>
+          Maximum number of modules to print
+      --json
+          Print machine-readable JSON
+      --rewrite-version <REWRITE_VERSION>
+          OpenRewrite version used when expanding short module names
+  -h, --help
+          Print help
+```
+
+### `jbx rewrite recipes`
+
+```text
+List or search recipes available from an OpenRewrite module
+
+Usage: jbx rewrite recipes [OPTIONS] <MODULE>
+
+Arguments:
+  <MODULE>  OpenRewrite module to inspect (short name or full GAV)
+
+Options:
+      --search <SEARCH>
+          Filter recipes by short name, fully-qualified name, display name, or description
+      --limit <LIMIT>
+          Maximum number of recipes to print
+      --detail
+          Include recipe descriptions and options
+      --json
+          Print machine-readable JSON
+      --cache-dir <CACHE_DIR>
+          Override dependency/helper cache directory
+      --repo <REPOS>
+          Additional repository for recipe modules
+      --rewrite-version <REWRITE_VERSION>
+          OpenRewrite version for built-in modules [default: 8.56.1]
+  -h, --help
+          Print help
+```
+
+> For exact behavior, prefer the skill bundled with the `jbx` binary on the machine running the task.

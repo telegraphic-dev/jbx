@@ -1,6 +1,7 @@
 ---
+
 title: jbx check command
-description: Run javac `-Xlint:all` and Error Prone by default, optionally as structured diagnostics.
+description: Diagnose the Java source file for errors
 ---
 
 # `check`
@@ -49,6 +50,45 @@ Use this as the first quality gate after edits. JSON diagnostics are the contrac
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx check`
+
+```text
+Check Java source files with javac diagnostics and Error Prone by default
+
+Usage: jbx check [OPTIONS] [PATHS]...
+
+Arguments:
+  [PATHS]...  Java source files or directories. Defaults to the current directory [default: .]
+
+Options:
+      --json
+          Emit structured diagnostics JSON
+      --no-error-prone
+          Disable Error Prone checks and run only javac/-Xlint diagnostics
+      --error-prone-version <ERROR_PRONE_VERSION>
+          Error Prone version to use when Error Prone is enabled [default: 2.39.0]
+      --warnings-as-errors
+          Treat javac and Error Prone warnings as errors
+      --deps <DEPS>
+          Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>
+          Additional repository, same shape as //REPOS
+      --class-path <CLASSPATH>
+          Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>
+          Additional javac option
+      --java <JAVA_VERSION>
+          Override requested Java version
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+  -h, --help
+          Print help
+```
 
 ## Skill
 

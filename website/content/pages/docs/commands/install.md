@@ -1,6 +1,7 @@
 ---
+
 title: jbx install command
-description: Install the current project into a Maven repository layout, usually `~/.m2/repository`.
+description: Install the current project into a Maven repository layout.
 ---
 
 # `install`
@@ -17,7 +18,7 @@ Install the current project into a Maven repository layout, usually `~/.m2/repos
 
 ```bash
 jbx install --file jbx.json
-jbx install --file jbx.json --repo build/local-m2
+jbx install --file jbx.json --destination build/local-m2
 jbx install src/main/java/com/acme/Tool.java
 ```
 
@@ -36,7 +37,7 @@ Use `install` as part of a repeatable repository workflow rather than a one-off 
 
 ## Agent notes
 
-Prefer a temporary `--repo` during automated tests to avoid polluting the developer’s real `~/.m2`. Verify the installed coordinates by resolving them.
+Prefer a temporary `--destination` during automated tests to avoid polluting the developer’s real `~/.m2`. Verify the installed coordinates by resolving them.
 
 ## JSON and schema
 
@@ -48,6 +49,30 @@ No `--json` mode yet. Verification is the installed POM/JAR path under the targe
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx install`
+
+```text
+Install the current project into a Maven repository layout
+
+Usage: jbx install [OPTIONS] [SCRIPT]
+
+Arguments:
+  [SCRIPT]  Java source file to install. Defaults to jbx.json main when --file is used
+
+Options:
+      --file <FILE>                jbx descriptor file. Defaults to ./jbx.json when present
+      --version <VERSION>          Override version from jbx.json or //GAV
+      --destination <DESTINATION>  Destination Maven repository root. Defaults to ~/.m2/repository
+      --target-dir <TARGET_DIR>    Working directory for staged install artifacts
+      --package <PACKAGE_NAME>     Override package used when staging default-package sources
+      --cache-dir <CACHE_DIR>      Override cache directory
+  -h, --help                       Print help
+```
 
 ## Skill
 

@@ -1,11 +1,12 @@
 ---
+
 title: jbx publish command
-description: Build Maven Central-ready bundles, local served repositories, or Portal uploads from `jbx.json` and sources.
+description: Publish Java projects to Maven repositories, including Maven Central.
 ---
 
 # `publish`
 
-Build Maven Central-ready bundles, local served repositories, or Portal uploads from `jbx.json` and sources.
+Publish Java projects to Maven repositories, including Maven Central.
 
 ## When to use it
 
@@ -17,8 +18,8 @@ Build Maven Central-ready bundles, local served repositories, or Portal uploads 
 
 ```bash
 jbx publish --file jbx.json --dry-run
-jbx publish --file jbx.json --local-repo build/repo
-jbx publish --file jbx.json --portal-upload
+jbx publish --file jbx.json --serve 8080
+jbx publish --file jbx.json --publish
 ```
 
 ## Real-life examples
@@ -48,6 +49,53 @@ No `--json` mode yet. Use dry-run output and generated bundle files as the verif
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx publish`
+
+```text
+Prepare Maven Central publishing artifacts
+
+Usage: jbx publish [OPTIONS] [SCRIPT]
+
+Arguments:
+  [SCRIPT]  Java source file to publish. Defaults to jbx.json main when --file is used
+
+Options:
+      --file <FILE>
+          jbx descriptor file. Defaults to ./jbx.json when present
+      --version <VERSION>
+          Override version from jbx.json or //GAV
+  -o, --output <OUTPUT>
+          Output Maven Central bundle ZIP path
+      --target-dir <TARGET_DIR>
+          Working directory for staged publish artifacts
+      --package <PACKAGE_NAME>
+          Override package used when staging default-package sources
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+      --dry-run
+          Prepare and verify artifacts without uploading
+      --skip-signing
+          Allow unsigned dry-run bundles for local inspection
+      --gpg-key <GPG_KEY>
+          GPG key ID/email to use for detached ASCII signatures
+      --publish
+          Upload to Maven Central and publish after validation
+      --serve <SERVE>
+          Serve a local Maven repository containing the artifact on the given port
+      --publishing-type <PUBLISHING_TYPE>
+          Maven Central Portal publishing type for the upload [default: automatic] [possible values: automatic, user-managed]
+      --no-wait
+          Do not poll Central after uploading the deployment bundle
+      --max-wait-seconds <MAX_WAIT_SECONDS>
+          Maximum seconds to wait for Maven Central publication before exiting [default: 600]
+  -h, --help
+          Print help
+```
 
 ## Skill
 

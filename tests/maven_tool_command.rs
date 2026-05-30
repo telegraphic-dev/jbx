@@ -196,6 +196,44 @@ fn jbx_runs_executable_jar_from_gav() {
 }
 
 #[test]
+fn jbx_passes_dash_args_to_maven_tool_without_separator() {
+    let tmp = tempfile::tempdir().unwrap();
+    let jar = build_executable_jar(&tmp);
+    let pom = br#"
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.telegraphic</groupId>
+  <artifactId>hello-tool</artifactId>
+  <version>1.0.0</version>
+</project>
+"#
+    .to_vec();
+    let repo = serve_files(HashMap::from([
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.pom",
+            pom,
+        ),
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.jar",
+            jar,
+        ),
+    ]));
+
+    let output = jbx_command()
+        .arg("--repo")
+        .arg(format!("local={repo}"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache-no-separator"))
+        .arg("dev.telegraphic:hello-tool:1.0.0")
+        .arg("--help")
+        .output()
+        .expect("failed to run jbx Maven executable with dash arg");
+
+    assert_success(&output);
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "jbx --help");
+}
+
+#[test]
 fn jbx_uses_latest_metadata_version_when_gav_version_is_omitted() {
     let tmp = tempfile::tempdir().unwrap();
     let jar = build_executable_jar(&tmp);

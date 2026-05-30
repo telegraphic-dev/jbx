@@ -1,4 +1,5 @@
 ---
+
 title: jbx app command
 description: Install, list, or uninstall Java scripts as PATH commands.
 ---
@@ -48,6 +49,68 @@ No `--json` mode yet. Use `app list` for installed command names and paths.
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx app`
+
+```text
+Manage scripts installed as commands on PATH
+
+Usage: jbx app <COMMAND>
+
+Commands:
+  install    Install a script as a command on PATH
+  uninstall  Remove an installed command
+  list       List installed script commands
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx app install`
+
+```text
+Install a script as a command on PATH
+
+Usage: jbx app install [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file to install
+
+Options:
+  -n, --name <NAME>  Command name (defaults to the script filename stem)
+      --force        Force overwrite an existing command
+  -h, --help         Print help
+```
+
+### `jbx app list`
+
+```text
+List installed script commands
+
+Usage: jbx app list
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx app uninstall`
+
+```text
+Remove an installed command
+
+Usage: jbx app uninstall <NAME>
+
+Arguments:
+  <NAME>  Command name to remove
+
+Options:
+  -h, --help  Print help
+```
 
 ## Skill
 

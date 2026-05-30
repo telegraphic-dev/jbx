@@ -1,4 +1,5 @@
 ---
+
 title: jbx fetch command
 description: Download artifacts and print classpath or dependency coordinates.
 ---
@@ -48,6 +49,27 @@ No `--json` mode yet. Output is meant for shell composition: classpath strings, 
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx fetch`
+
+```text
+Fetch Maven dependency artifacts and print classpath
+
+Usage: jbx fetch [OPTIONS] <COORDINATES>...
+
+Arguments:
+  <COORDINATES>...  Maven coordinates to fetch (groupId:artifactId:version)
+
+Options:
+      --repo <REPOS>           Additional repository (id=url format or bare URL)
+      --cache-dir <CACHE_DIR>  Override cache directory
+      --deps-only              Print resolved coordinates instead of classpath
+  -h, --help                   Print help
+```
 
 ## Skill
 

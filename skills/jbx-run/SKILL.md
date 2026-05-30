@@ -1,65 +1,88 @@
 ---
 name: jbx-run
-description: Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
+description: Run Java source or Maven artifact
 ---
 
-# jbx-run
+# `run`
 
 Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-run
-```
-
-## Use when
+## When to use it
 
 - Run a one-file maintenance script from a repository without creating a Maven or Gradle project.
 - Launch a Java 25 compact script that carries `//DEPS`, `//JAVA`, `//SOURCES`, and runtime options in the file.
 - Smoke-test an executable example after `jbx check --json` has confirmed the source compiles.
 
-## Quick commands
+## Common workflows
 
-```sh
-jbx run scripts/Report.java -- --month 2026-05
+```bash
+jbx run scripts/Report.java --month 2026-05
 jbx scripts/Report.java --month 2026-05
-jbx run --deps info.picocli:picocli:4.7.7 tools/Cli.java -- --help
+jbx run --deps info.picocli:picocli:4.7.7 tools/Cli.java --help
 ```
 
-## Practical workflow
+## Passing arguments
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+`run` options go before the script path. After the script path, arguments belong to the Java program, including Picocli-style options such as `--help`, `--input`, or `--verbose`.
 
-## Real-life use cases
+Use an explicit `--` only when the Java program needs to receive a literal double-dash argument.
 
-- Run a one-file maintenance script from a repository without creating a Maven or Gradle project.
-- Launch a Java 25 compact script that carries `//DEPS`, `//JAVA`, `//SOURCES`, and runtime options in the file.
-- Smoke-test an executable example after `jbx check --json` has confirmed the source compiles.
+## Real-life examples
 
-## Agent guidance
+### Repository maintenance
+
+Use `run` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+
+### Agent loop
+
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Treat `run` as the boundary where arbitrary user code executes. For autonomous loops, first inspect with `info`, compile with `build`, or validate with `check --json`; only run after the command and arguments are understood.
 
-## Structured output
+## JSON and schema
 
 No `--json` mode: stdout/stderr belong to the program being run. Use `jbx check --json`, `jbx build`, `jbx info ...`, or `jbx doctor --json` for machine-readable preflight facts before execution.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
 
-> Tip: for exact release behavior, rerun `jbx skill get jbx-run` from the target machine.
+### `jbx run`
+
+```text
+Compile and run a Java source file
+
+Usage: jbx run [OPTIONS] <SCRIPT> [ARGS]...
+
+Arguments:
+  <SCRIPT>   Java source file
+  [ARGS]...  Arguments passed to the script
+
+Options:
+      --deps <DEPS>                       Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>                      Additional repository, same shape as //REPOS
+      --source <SOURCES>                  Additional source file, same shape as //SOURCES
+      --files <FILES>                     Additional file/resource, same shape as //FILES
+      --class-path <CLASSPATH>            Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>      Additional javac option
+      --runtime-option <RUNTIME_OPTIONS>  Additional java runtime option
+      --java <JAVA_VERSION>               Override //JAVA requested version
+      --javaagent <JAVA_AGENTS>           Additional java agent, same shape as //JAVAAGENT
+      --main <MAIN_CLASS>                 Override //MAIN / inferred class name
+      --cache-dir <CACHE_DIR>             Override cache directory
+      --trust                             Trust this remote script content hash before running
+  -h, --help                              Print help
+```
+
+> For exact behavior, prefer the skill bundled with the `jbx` binary on the machine running the task.

@@ -1,6 +1,7 @@
 ---
+
 title: jbx run command
-description: Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
+description: Run Java source or Maven artifact
 ---
 
 # `run`
@@ -16,10 +17,16 @@ Compile and run one Java source file, including Java 25 compact scripts, with JB
 ## Common workflows
 
 ```bash
-jbx run scripts/Report.java -- --month 2026-05
+jbx run scripts/Report.java --month 2026-05
 jbx scripts/Report.java --month 2026-05
-jbx run --deps info.picocli:picocli:4.7.7 tools/Cli.java -- --help
+jbx run --deps info.picocli:picocli:4.7.7 tools/Cli.java --help
 ```
+
+## Passing arguments
+
+`run` options go before the script path. After the script path, arguments belong to the Java program, including Picocli-style options such as `--help`, `--input`, or `--verbose`.
+
+Use an explicit `--` only when the Java program needs to receive a literal double-dash argument.
 
 ## Real-life examples
 
@@ -48,6 +55,37 @@ No `--json` mode: stdout/stderr belong to the program being run. Use `jbx check 
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx run`
+
+```text
+Compile and run a Java source file
+
+Usage: jbx run [OPTIONS] <SCRIPT> [ARGS]...
+
+Arguments:
+  <SCRIPT>   Java source file
+  [ARGS]...  Arguments passed to the script
+
+Options:
+      --deps <DEPS>                       Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>                      Additional repository, same shape as //REPOS
+      --source <SOURCES>                  Additional source file, same shape as //SOURCES
+      --files <FILES>                     Additional file/resource, same shape as //FILES
+      --class-path <CLASSPATH>            Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>      Additional javac option
+      --runtime-option <RUNTIME_OPTIONS>  Additional java runtime option
+      --java <JAVA_VERSION>               Override //JAVA requested version
+      --javaagent <JAVA_AGENTS>           Additional java agent, same shape as //JAVAAGENT
+      --main <MAIN_CLASS>                 Override //MAIN / inferred class name
+      --cache-dir <CACHE_DIR>             Override cache directory
+      --trust                             Trust this remote script content hash before running
+  -h, --help                              Print help
+```
 
 ## Skill
 

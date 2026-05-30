@@ -3,63 +3,203 @@ name: jbx-export
 description: Export local, portable, or native runnable artifacts.
 ---
 
-# jbx-export
+# `export`
 
 Export local, portable, or native runnable artifacts.
 
-This skill is bundled with `jbx` so agents can get guidance that matches the installed binary:
-
-```sh
-jbx skill get jbx-export
-```
-
-## Use when
+## When to use it
 
 - Package a script for a machine that should not re-resolve dependencies at runtime.
 - Create a portable directory with jars and launch metadata for CI artifacts.
 - Build a native executable when GraalVM/native-image is available.
 
-## Quick commands
+## Common workflows
 
-```sh
+```bash
 jbx export local Hello.java --output build/hello.jar
 jbx export portable Hello.java --output dist/hello
 jbx export native Hello.java --output dist/hello
 ```
 
-## Practical workflow
+## Real-life examples
 
-1. Read the current repository state and identify the smallest target: one file, one directory, one coordinate, or one catalog entry.
-2. Run the safest inspection form first. If a JSON mode exists, use it and parse it as data.
-3. Make the requested change only after the command output supports it.
-4. Verify with the command itself plus the next higher gate (`jbx check --json`, `jbx test --json`, artifact inspection, or `git diff`).
+### Repository maintenance
 
-## Real-life use cases
+Use `export` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
 
-- Package a script for a machine that should not re-resolve dependencies at runtime.
-- Create a portable directory with jars and launch metadata for CI artifacts.
-- Build a native executable when GraalVM/native-image is available.
+### Agent loop
 
-## Agent guidance
+1. Run the command in the narrowest scope that answers the task.
+2. Prefer JSON/structured output when this command exposes it.
+3. Verify the claimed result with files, exit codes, or the next quality gate.
+
+## Agent notes
 
 Export is a build artifact operation. Check the output path, run the produced artifact with a harmless argument, and keep native-image failures actionable rather than swallowing tool output.
 
-## Structured output
+## JSON and schema
 
 No `--json` mode yet. Verify produced files directly in the requested output directory.
 
-## Common mistakes
+## Verification checklist
 
-- Do not infer command semantics from old web snippets; this skill reflects the installed release.
-- Do not scrape human output when a JSON mode exists.
-- Do not widen scope from a single file to the whole repository until the focused command is clean.
-- Do not hide non-zero exits behind a successful parser or wrapper script.
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
-## Verification
+## Arguments and flags
 
-- Parse JSON output where available and validate required fields.
-- For file changes, inspect `git diff --stat` and the exact changed files.
-- For generated artifacts, test that the expected output path exists and is usable.
-- For environment failures, run `jbx doctor --json` and report the failed checks with remediation.
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
 
-> Tip: for exact release behavior, rerun `jbx skill get jbx-export` from the target machine.
+### `jbx export`
+
+```text
+Export runnable JARs
+
+Usage: jbx export <COMMAND>
+
+Commands:
+  local     Export a runnable JAR with manifest classpath entries pointing at local paths
+  portable  Export a runnable JAR plus lib/ dependencies for portable use
+  native    Export a native executable using GraalVM native-image
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `jbx export local`
+
+```text
+Export a runnable JAR with manifest classpath entries pointing at local paths
+
+Usage: jbx export local [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file or catalog alias to export
+
+Options:
+  -o, --output <OUTPUT>
+          Output JAR path (defaults to <script>.jar)
+      --force
+          Force overwrite of existing output files
+      --deps <DEPS>
+          Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>
+          Additional repository, same shape as //REPOS
+      --source <SOURCES>
+          Additional source file, same shape as //SOURCES
+      --files <FILES>
+          Additional file/resource, same shape as //FILES
+      --class-path <CLASSPATH>
+          Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>
+          Additional javac option
+      --runtime-option <RUNTIME_OPTIONS>
+          Additional java runtime option, same shape as //JAVA_OPTIONS
+      --java <JAVA_VERSION>
+          Override //JAVA requested version
+      --javaagent <JAVA_AGENTS>
+          Additional java agent, same shape as //JAVAAGENT
+      --main <MAIN_CLASS>
+          Override //MAIN / inferred class name
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+      --trust
+          Trust this remote script content hash before exporting
+  -h, --help
+          Print help
+```
+
+### `jbx export portable`
+
+```text
+Export a runnable JAR plus lib/ dependencies for portable use
+
+Usage: jbx export portable [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file or catalog alias to export
+
+Options:
+  -o, --output <OUTPUT>
+          Output JAR path (defaults to <script>.jar)
+      --force
+          Force overwrite of existing output files
+      --deps <DEPS>
+          Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>
+          Additional repository, same shape as //REPOS
+      --source <SOURCES>
+          Additional source file, same shape as //SOURCES
+      --files <FILES>
+          Additional file/resource, same shape as //FILES
+      --class-path <CLASSPATH>
+          Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>
+          Additional javac option
+      --runtime-option <RUNTIME_OPTIONS>
+          Additional java runtime option, same shape as //JAVA_OPTIONS
+      --java <JAVA_VERSION>
+          Override //JAVA requested version
+      --javaagent <JAVA_AGENTS>
+          Additional java agent, same shape as //JAVAAGENT
+      --main <MAIN_CLASS>
+          Override //MAIN / inferred class name
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+      --trust
+          Trust this remote script content hash before exporting
+  -h, --help
+          Print help
+```
+
+### `jbx export native`
+
+```text
+Export a native executable using GraalVM native-image
+
+Usage: jbx export native [OPTIONS] <SCRIPT>
+
+Arguments:
+  <SCRIPT>  Java source file or catalog alias to export
+
+Options:
+  -o, --output <OUTPUT>
+          Output executable path (defaults to <script> with platform executable suffix)
+      --force
+          Force overwrite of existing output files
+      --native-image <NATIVE_IMAGE>
+          Path to native-image executable (defaults to JDK bin/native-image or PATH)
+      --native-option <NATIVE_OPTIONS>
+          Additional native-image option, same shape as //NATIVE_OPTIONS
+      --deps <DEPS>
+          Additional dependency coordinates, same shape as //DEPS
+      --repo <REPOS>
+          Additional repository, same shape as //REPOS
+      --source <SOURCES>
+          Additional source file, same shape as //SOURCES
+      --files <FILES>
+          Additional file/resource, same shape as //FILES
+      --class-path <CLASSPATH>
+          Additional classpath entries
+      --javac-option <JAVAC_OPTIONS>
+          Additional javac option
+      --runtime-option <RUNTIME_OPTIONS>
+          Additional java runtime option, same shape as //JAVA_OPTIONS
+      --java <JAVA_VERSION>
+          Override //JAVA requested version
+      --javaagent <JAVA_AGENTS>
+          Additional java agent, same shape as //JAVAAGENT
+      --main <MAIN_CLASS>
+          Override //MAIN / inferred class name
+      --cache-dir <CACHE_DIR>
+          Override cache directory
+      --trust
+          Trust this remote script content hash before exporting
+  -h, --help
+          Print help
+```
+
+> For exact behavior, prefer the skill bundled with the `jbx` binary on the machine running the task.

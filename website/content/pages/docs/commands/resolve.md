@@ -1,6 +1,7 @@
 ---
+
 title: jbx resolve command
-description: Resolve Maven coordinates to dependency coordinates without running code.
+description: Resolve Maven coordinates
 ---
 
 # `resolve`
@@ -17,8 +18,8 @@ Resolve Maven coordinates to dependency coordinates without running code.
 
 ```bash
 jbx resolve com.fasterxml.jackson.core:jackson-databind:2.17.2
-jbx resolve --scope runtime org.slf4j:slf4j-simple:2.0.17
-jbx resolve --tree com.acme:app:1.0.0
+jbx resolve --repo snapshots=https://repo.example.com/snapshots com.acme:tool:1.0.0-SNAPSHOT
+jbx resolve --classpath com.acme:app:1.0.0
 ```
 
 ## Real-life examples
@@ -48,6 +49,27 @@ No `--json` mode yet. Output is dependency coordinates or classpath-style text d
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx resolve`
+
+```text
+Resolve Maven dependencies without running
+
+Usage: jbx resolve [OPTIONS] <COORDINATES>...
+
+Arguments:
+  <COORDINATES>...  Maven coordinates to resolve (groupId:artifactId:version)
+
+Options:
+      --repo <REPOS>           Additional repository (id=url format or bare URL)
+      --cache-dir <CACHE_DIR>  Override cache directory
+  -c, --classpath              Print classpath (JAR paths) instead of coordinates
+  -h, --help                   Print help
+```
 
 ## Skill
 

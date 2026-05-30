@@ -1,6 +1,7 @@
 ---
+
 title: jbx search command
-description: Search Maven Central artifacts by text or coordinates, with filters.
+description: Search Maven Central artifacts
 ---
 
 # `search`
@@ -17,8 +18,8 @@ Search Maven Central artifacts by text or coordinates, with filters.
 
 ```bash
 jbx search picocli --json
-jbx search --group org.junit.platform console standalone --json
-jbx search --latest com.fasterxml.jackson.core:jackson-databind --json
+jbx search --group org.junit.platform --id junit-platform-console-standalone --json
+jbx search --group com.fasterxml.jackson.core --id jackson-databind --version 2.17.2 --json
 ```
 
 ## Real-life examples
@@ -48,6 +49,29 @@ Prefer exact group/artifact filters once a candidate is known. Do not auto-upgra
 - For mutating commands, inspect `git diff` or the generated artifact path.
 - For JSON modes, parse the output instead of scraping the human form.
 - For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+
+## Arguments and flags
+
+This section is copied from the CLI help for this release so the page explains the actual accepted arguments.
+
+### `jbx search`
+
+```text
+Search Maven Central for artifacts
+
+Usage: jbx search [OPTIONS] [QUERY]...
+
+Arguments:
+  [QUERY]...  Search text, Solr query, or Maven coordinate (group:artifact[:version])
+
+Options:
+      --group <GROUP>      Solr groupId filter (maps to g:<group>)
+      --id <ID>            Solr artifactId filter (maps to a:<id>)
+      --version <VERSION>  Solr version filter (maps to v:<version> and searches the gav core)
+  -n, --limit <LIMIT>      Maximum number of results to return [default: 20]
+      --json               Return structured JSON for agent/tool consumption
+  -h, --help               Print help
+```
 
 ## Skill
 
