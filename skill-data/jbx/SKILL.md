@@ -33,7 +33,7 @@ jbx <GAV|script.java> [args...]
 jbx run <script.java> [args...]
 jbx build <script.java>
 jbx check [path...] [--json]
-jbx test [script.java|directory]
+jbx test [script.java|directory] [--coverage] [--jacoco-version version]
 jbx fmt [path...]
 jbx doctor [script.java|url] [--json] [--cache-dir dir] [--repo id=url] [--publish] [--native]
 jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json]
@@ -56,7 +56,7 @@ jbx jdk home [version]
 jbx jdk install <version>
 ```
 
-Use `--json` when another tool or agent needs stable machine-readable output. Run `jbx doctor --json` to diagnose JDK selection, Maven Central reachability, cache writability, formatter fallback, remote trust, dependency resolution/version drift, and optional publishing/native tools.
+Use `--json` when another tool or agent needs stable machine-readable output. Run `jbx doctor --json` to diagnose JDK selection, Maven Central reachability, cache writability, formatter fallback, remote trust, dependency resolution/version drift, and optional publishing/native tools. With `jbx test --coverage --json`, the JSON includes a `coverage` object with JaCoCo exec/html/xml paths and aggregate counters.
 
 ## Source Rewriting
 

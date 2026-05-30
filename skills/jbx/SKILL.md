@@ -40,7 +40,8 @@ If the user has multiple jbx binaries, use the same binary that will run the pro
 ```sh
 jbx <GAV|script.java> [args...]
 jbx check [path...] [--json]
-jbx test [script.java|directory]
+jbx test [script.java|directory] [--coverage] [--jacoco-version version]
+jbx test [script.java|directory] --coverage --json
 jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--json]
 jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--json]
 jbx rewrite modules [--search term] [--limit n] [--json]

@@ -35,7 +35,7 @@ Implemented now:
 - `jbx catalog add <name> <catalog-path-or-url> [--import]` register an external catalog
 - `jbx catalog list [--json]` list external catalogs from the nearest `jbang-catalog.json`
 - `jbx run <alias>` / `jbx <alias>` run local catalog aliases
-- `jbx test [script.java|directory]` run JUnit tests with the standalone console launcher
+- `jbx test [script.java|directory]` run JUnit tests with the standalone console launcher; add `--coverage` to collect JaCoCo data, generate `target/site/jacoco/index.html` plus `jacoco.xml`, and include coverage paths/counters in `--json` output (optionally pin the agent with `--jacoco-version`)
 - `jbx fmt [path...]` format Java files with Palantir Java Format, including Java 25 compact scripts
 - `jbx doctor [script.java|url] [--json] [--cache-dir dir] [--repo id=url] [--publish] [--native]` diagnoses JDK selection, Maven Central reachability, cache writability, formatter fallback, remote trust, dependency resolution/version drift, and context-only tools such as GPG/native-image
 - `jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json] [--fail-on-changes] [--no-fail-on-invalid-recipes] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` previews OpenRewrite changes and writes `rewrite/rewrite.patch`

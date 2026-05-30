@@ -20,6 +20,12 @@ fn assert_success(out: &Output) {
     );
 }
 
+fn assert_non_empty_file(path: &Path) {
+    let metadata = fs::metadata(path)
+        .unwrap_or_else(|err| panic!("expected file at {}; error: {err}", path.display()));
+    assert!(metadata.len() > 0, "{} should not be empty", path.display());
+}
+
 fn with_junit_version(command: &mut Command) -> &mut Command {
     command.arg("--junit-version").arg("6.1.0")
 }
@@ -176,6 +182,80 @@ fn test_runs_junit_standalone_launcher_by_default() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("CalculatorTest"), "stdout was {stdout}");
     assert!(stdout.contains("addsNumbers"), "stdout was {stdout}");
+}
+
+#[test]
+fn test_coverage_flag_writes_jacoco_reports() {
+    let tmp = tempfile::tempdir().unwrap();
+    let test = write_junit_test(&tmp);
+    let coverage_file = tmp.path().join("target/jacoco.exec");
+    let html_report = tmp.path().join("target/site/jacoco/index.html");
+    let xml_report = tmp.path().join("target/site/jacoco/jacoco.xml");
+
+    let out = with_junit_version(juv_command().arg("test"))
+        .arg("--coverage")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&test)
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Coverage report: target/site/jacoco/index.html"),
+        "stdout was {stdout}"
+    );
+    assert_non_empty_file(&coverage_file);
+    assert_non_empty_file(&html_report);
+    assert_non_empty_file(&xml_report);
+}
+
+#[test]
+fn test_coverage_json_includes_report_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    let test = write_junit_test(&tmp);
+
+    let out = with_junit_version(juv_command().arg("test"))
+        .arg("--coverage")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&test)
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let json: Value = serde_json::from_slice(&out.stdout).expect("stdout should be JSON");
+    assert_eq!(json["coverage"]["execFile"], "target/jacoco.exec");
+    assert_eq!(
+        json["coverage"]["htmlReport"],
+        "target/site/jacoco/index.html"
+    );
+    assert_eq!(
+        json["coverage"]["xmlReport"],
+        "target/site/jacoco/jacoco.xml"
+    );
+    assert!(
+        json["coverage"]["counters"]["LINE"]["covered"]
+            .as_u64()
+            .unwrap_or(0)
+            > 0,
+        "coverage counters should include covered lines: {json:#}"
+    );
+    assert_eq!(json["coverage"]["jacocoXml"]["name"], "report");
+    let jacoco_json = json["coverage"]["jacocoXml"].to_string();
+    assert!(
+        jacoco_json.contains("CalculatorTest"),
+        "converted JaCoCo XML should include covered classes: {jacoco_json}"
+    );
+    assert!(
+        jacoco_json.contains("\"counter\""),
+        "converted JaCoCo XML should include XML counter nodes: {jacoco_json}"
+    );
+    assert_non_empty_file(&tmp.path().join("target/site/jacoco/index.html"));
 }
 
 #[test]

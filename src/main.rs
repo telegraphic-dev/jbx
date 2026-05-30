@@ -430,6 +430,16 @@ struct TestCommand {
     #[arg(long = "xml", conflicts_with = "json")]
     xml: bool,
 
+    /// Collect JaCoCo coverage data in target/jacoco.exec.
+    #[arg(long = "coverage")]
+    coverage: bool,
+
+    /// JaCoCo agent version to use when --coverage is enabled.
+    ///
+    /// Defaults to the built-in version (0.8.13).
+    #[arg(long = "jacoco-version", requires = "coverage")]
+    jacoco_version: Option<String>,
+
     /// JUnit Platform Console Standalone version to use.
     ///
     /// Defaults to the cached latest Maven Central release, refreshed periodically.
@@ -6694,6 +6704,13 @@ const JBX_CHECK_COMPILER_MAIN_CLASS: &str = "dev.telegraphic.jbx.check.JbxCheckC
 
 const JUNIT_GROUP_ID: &str = "org.junit.platform";
 const JUNIT_ARTIFACT_ID: &str = "junit-platform-console-standalone";
+const JACOCO_VERSION: &str = "0.8.13";
+const JACOCO_AGENT_PREFIX: &str = "org.jacoco.agent-";
+const JACOCO_CLI_PREFIX: &str = "org.jacoco.cli-";
+const JACOCO_COVERAGE_FILE: &str = "target/jacoco.exec";
+const JACOCO_REPORT_DIR: &str = "target/site/jacoco";
+const JACOCO_XML_REPORT: &str = "target/site/jacoco/jacoco.xml";
+const JACOCO_HTML_REPORT: &str = "target/site/jacoco/index.html";
 
 fn run_tests(cmd: TestCommand) -> Result<i32> {
     let junit_version = match cmd.junit_version.clone() {
@@ -6721,13 +6738,23 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     dedupe_strings(&mut extra_sources);
 
     let mut directive_files = vec![script.clone()];
-    let base_dir = script.parent().unwrap_or_else(|| Path::new("."));
+    let base_dir = script
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
     directive_files.extend(extra_sources.iter().map(|source| base_dir.join(source)));
     let source_directives = collect_check_directives(&directive_files)?;
 
     let mut deps = source_directives.deps;
     deps.extend(split_cli_words(&cmd.deps));
     deps.push(launcher_coordinate);
+    if cmd.coverage {
+        let jacoco_version = cmd.jacoco_version.as_deref().unwrap_or(JACOCO_VERSION);
+        deps.push(format!(
+            "org.jacoco:org.jacoco.agent:runtime:{jacoco_version}"
+        ));
+        deps.push(format!("org.jacoco:org.jacoco.cli:nodeps:{jacoco_version}"));
+    }
     let mut repos = source_directives.repos;
     repos.extend(split_cli_words(&cmd.repos));
     let mut javac_options = source_directives.javac_options;
@@ -6761,6 +6788,43 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("could not resolve junit-platform-console-standalone"))?;
 
+    let jacoco_agent = if cmd.coverage {
+        Some(
+            build
+                .classpath
+                .iter()
+                .find(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            name.starts_with(JACOCO_AGENT_PREFIX) && name.ends_with("-runtime.jar")
+                        })
+                })
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("could not resolve JaCoCo agent"))?,
+        )
+    } else {
+        None
+    };
+    let jacoco_cli = if cmd.coverage {
+        Some(
+            build
+                .classpath
+                .iter()
+                .find(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            name.starts_with(JACOCO_CLI_PREFIX) && name.ends_with("-nodeps.jar")
+                        })
+                })
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("could not resolve JaCoCo CLI"))?,
+        )
+    } else {
+        None
+    };
+
     let reports_dir = junit_reports_dir()?;
     fs::create_dir_all(&reports_dir)?;
     let mut runtime_cp = vec![build.classes_dir.clone()];
@@ -6769,6 +6833,17 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     let jdk_root = jbx::jdk::resolve_jdk(&build.directives.java_version, true)?;
     let java = jbx::jdk::java_bin_path(&jdk_root).display().to_string();
     let mut java_cmd = ProcessCommand::new(&java);
+    if let Some(agent) = &jacoco_agent {
+        let coverage_path = PathBuf::from(JACOCO_COVERAGE_FILE);
+        if let Some(parent) = coverage_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        java_cmd.arg(format!(
+            "-javaagent:{}=destfile={},append=false",
+            agent.display(),
+            coverage_path.display()
+        ));
+    }
     for agent in &build.directives.java_agents {
         java_cmd.arg(format_cli_java_agent(agent));
     }
@@ -6794,22 +6869,223 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     let code = output.status.code().unwrap_or(1);
     let xml = read_junit_xml_reports(&reports_dir)?;
     let _ = fs::remove_dir_all(&reports_dir);
+    let coverage = if let Some(cli) = &jacoco_cli {
+        Some(write_jacoco_report(
+            &java,
+            cli,
+            &build.classes_dir,
+            &base_dir,
+        )?)
+    } else {
+        None
+    };
 
     if (cmd.json || cmd.xml) && !output.status.success() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
     }
 
     if cmd.json {
-        let payload = junit_xml_to_json(&xml)?;
+        let mut payload = junit_xml_to_json(&xml)?;
+        if let Some(coverage) = &coverage {
+            payload["coverage"] = coverage.clone();
+        }
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else if cmd.xml {
         print!("{xml}");
     } else {
         print!("{}", String::from_utf8_lossy(&output.stdout));
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        if coverage.is_some() {
+            println!("Coverage data: {JACOCO_COVERAGE_FILE}");
+            println!("Coverage report: {JACOCO_HTML_REPORT}");
+            println!("Coverage XML: {JACOCO_XML_REPORT}");
+        }
     }
 
     Ok(code)
+}
+
+fn write_jacoco_report(
+    java: &str,
+    cli: &Path,
+    classes_dir: &Path,
+    source_dir: &Path,
+) -> Result<serde_json::Value> {
+    let coverage_file = Path::new(JACOCO_COVERAGE_FILE);
+    let report_dir = Path::new(JACOCO_REPORT_DIR);
+    let xml_report = Path::new(JACOCO_XML_REPORT);
+    fs::create_dir_all(report_dir)?;
+    let output = ProcessCommand::new(java)
+        .arg("-jar")
+        .arg(cli)
+        .arg("report")
+        .arg(coverage_file)
+        .arg("--classfiles")
+        .arg(classes_dir)
+        .arg("--sourcefiles")
+        .arg(source_dir)
+        .arg("--html")
+        .arg(report_dir)
+        .arg("--xml")
+        .arg(xml_report)
+        .output()
+        .with_context(|| format!("failed to execute JaCoCo CLI with {java}"))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "JaCoCo report generation failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let mut coverage = serde_json::json!({
+        "execFile": JACOCO_COVERAGE_FILE,
+        "htmlReport": JACOCO_HTML_REPORT,
+        "xmlReport": JACOCO_XML_REPORT,
+    });
+    let jacoco_xml = fs::read_to_string(xml_report)?;
+    coverage["counters"] = jacoco_counters_to_json(&jacoco_xml)?;
+    coverage["jacocoXml"] = xml_to_json_tree(&jacoco_xml)?;
+    Ok(coverage)
+}
+
+fn jacoco_counters_to_json(xml: &str) -> Result<serde_json::Value> {
+    let counter_re = regex::Regex::new(
+        r#"<counter\s+type=\"([^\"]+)\"\s+missed=\"(\d+)\"\s+covered=\"(\d+)\"\s*/>"#,
+    )?;
+    let mut counters = serde_json::Map::new();
+    for captures in counter_re.captures_iter(xml) {
+        let counter_type = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let missed = captures
+            .get(2)
+            .and_then(|m| m.as_str().parse::<u64>().ok())
+            .unwrap_or(0);
+        let covered = captures
+            .get(3)
+            .and_then(|m| m.as_str().parse::<u64>().ok())
+            .unwrap_or(0);
+        counters.insert(
+            counter_type.to_string(),
+            serde_json::json!({
+                "missed": missed,
+                "covered": covered,
+                "total": missed + covered,
+            }),
+        );
+    }
+    Ok(serde_json::Value::Object(counters))
+}
+
+#[derive(Debug)]
+struct XmlJsonNode {
+    name: String,
+    attributes: serde_json::Map<String, serde_json::Value>,
+    children: Vec<serde_json::Value>,
+    text: String,
+}
+
+impl XmlJsonNode {
+    fn new(name: String, attributes: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self {
+            name,
+            attributes,
+            children: Vec::new(),
+            text: String::new(),
+        }
+    }
+
+    fn into_value(self) -> serde_json::Value {
+        let mut object = serde_json::Map::new();
+        object.insert("name".to_string(), serde_json::Value::String(self.name));
+        if !self.attributes.is_empty() {
+            object.insert(
+                "attributes".to_string(),
+                serde_json::Value::Object(self.attributes),
+            );
+        }
+        let text = self.text.trim();
+        if !text.is_empty() {
+            object.insert(
+                "text".to_string(),
+                serde_json::Value::String(text.to_string()),
+            );
+        }
+        if !self.children.is_empty() {
+            object.insert(
+                "children".to_string(),
+                serde_json::Value::Array(self.children),
+            );
+        }
+        serde_json::Value::Object(object)
+    }
+}
+
+fn xml_to_json_tree(xml: &str) -> Result<serde_json::Value> {
+    use quick_xml::events::{BytesStart, Event};
+    use quick_xml::Reader;
+
+    fn node_from_start(start: &BytesStart<'_>) -> XmlJsonNode {
+        let name = String::from_utf8_lossy(start.name().as_ref()).to_string();
+        let mut attributes = serde_json::Map::new();
+        for attr in start.attributes().flatten() {
+            let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+            let value = String::from_utf8_lossy(attr.value.as_ref()).to_string();
+            attributes.insert(key, serde_json::Value::String(value));
+        }
+        XmlJsonNode::new(name, attributes)
+    }
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut stack: Vec<XmlJsonNode> = Vec::new();
+    let mut root = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(start)) => stack.push(node_from_start(&start)),
+            Ok(Event::Empty(start)) => {
+                let node = node_from_start(&start).into_value();
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else {
+                    root = Some(node);
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if let Some(current) = stack.last_mut() {
+                    let value = String::from_utf8_lossy(text.as_ref());
+                    if !value.trim().is_empty() {
+                        current.text.push_str(&value);
+                    }
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if let Some(current) = stack.last_mut() {
+                    let value = String::from_utf8_lossy(text.as_ref());
+                    if !value.trim().is_empty() {
+                        current.text.push_str(&value);
+                    }
+                }
+            }
+            Ok(Event::End(_)) => {
+                let node = stack
+                    .pop()
+                    .ok_or_else(|| anyhow::anyhow!("unexpected closing XML element"))?
+                    .into_value();
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else {
+                    root = Some(node);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(err) => anyhow::bail!("failed to parse XML report: {err}"),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    root.ok_or_else(|| anyhow::anyhow!("XML report did not contain a root element"))
 }
 
 fn junit_reports_dir() -> Result<PathBuf> {
