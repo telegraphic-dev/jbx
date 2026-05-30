@@ -222,6 +222,22 @@ Use `dependencies` / `//DEPS` for dependencies needed to compile the published a
 
 For GitHub-hosted repositories, `jbx publish` can prefill Maven Central POM `url`, `licenses`, `developers`, and `scm` metadata from the `origin` remote plus `gh repo view` when those fields are omitted. Put the fields in `jbx.json` when you want explicit release metadata instead of GitHub-derived defaults. Signed Central-ready bundles require a configured GPG key; `--skip-signing` is only for local inspection. Real Portal publishing requires a generated Maven Central user token supplied via environment variables only: preferably `CENTRAL_TOKEN_USERNAME` / `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` containing the base64-encoded `username:password` value expected by the Portal API.
 
+A real multi-artifact release setup looks like `telegraphic-dev/jbx-utils`: each helper (`jbx-check`, `jbx-graph`, `jbx-rewrite`) has its own `jbx.json`, PR CI runs a script around `jbx publish --dry-run --skip-signing`, and the release workflow publishes with a matrix only after a GitHub release or manual dispatch. The publish workflow imports `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`, sets `CENTRAL_TOKEN_USERNAME`/`CENTRAL_TOKEN_PASSWORD`, derives the version from `workflow_dispatch` input or `GITHUB_REF_NAME#v`, then runs:
+
+```bash
+jbx publish \
+  --publish \
+  --file "${PROJECT}/jbx.json" \
+  --version "$VERSION" \
+  --output "target/${PROJECT}-central-bundle.zip" \
+  --target-dir "target/publish/${PROJECT}" \
+  --cache-dir .jbx-cache
+```
+
+Keep `--publish` out of PR CI. Normal checks should prove the bundle shape; the release workflow should be the only place that talks to Maven Central.
+
+Full descriptor and GitHub Actions examples are in `docs/jbx-json.md` and `/docs/jbx-json/` on the website.
+
 ## Development
 
 ```bash

@@ -154,6 +154,130 @@ If the repository has helpers, examples, or generated files you do not want in t
 }
 ```
 
+### Publish helper artifacts from GitHub Actions
+
+`telegraphic-dev/jbx-utils` is a good shape for a real repository: one repo, several small helper artifacts, each with its own descriptor. The `jbx-rewrite/jbx.json` descriptor keeps shared Maven metadata explicit and only names the source and dependencies for that artifact:
+
+```json
+{
+  "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
+  "group": "dev.telegraphic.jbx",
+  "version": "0.1.0",
+  "package": "dev.telegraphic.jbx",
+  "url": "https://github.com/telegraphic-dev/jbx-utils",
+  "licenses": [
+    { "name": "MIT License", "url": "https://opensource.org/licenses/MIT" }
+  ],
+  "developers": [
+    { "name": "Telegraphic", "organizationUrl": "https://github.com/telegraphic-dev" }
+  ],
+  "scm": {
+    "connection": "scm:git:https://github.com/telegraphic-dev/jbx-utils.git",
+    "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/jbx-utils.git",
+    "url": "https://github.com/telegraphic-dev/jbx-utils"
+  },
+  "java": "21",
+  "main": "src/JbxRewrite.java",
+  "id": "jbx-rewrite",
+  "name": "jbx-rewrite",
+  "description": "OpenRewrite runner and recipe-discovery helper used by jbx rewrite",
+  "dependencies": [
+    "org.openrewrite:rewrite-core:8.56.1",
+    "org.openrewrite:rewrite-java:8.56.1"
+  ]
+}
+```
+
+Use CI to prove the bundle layout before release. `jbx-utils` runs dry-run publishing without signing for every helper artifact:
+
+```yaml
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install jbx
+        run: cargo install --git https://github.com/telegraphic-dev/jbx.git --locked jbx
+      - name: Verify publish bundle
+        run: scripts/verify-publish-bundle.sh
+```
+
+Then keep real Maven Central uploads in a separate release/manual workflow. The workflow needs these GitHub secrets: `CENTRAL_TOKEN_USERNAME`, `CENTRAL_TOKEN_PASSWORD`, `GPG_PRIVATE_KEY`, and `GPG_PASSPHRASE`.
+
+```yaml
+name: Publish to Maven Central
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Maven artifact version to publish, e.g. 0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [jbx-check, jbx-graph, jbx-rewrite]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install jbx
+        run: cargo install --git https://github.com/telegraphic-dev/jbx.git --locked jbx
+      - name: Import GPG key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+      - name: Publish ${{ matrix.project }}
+        env:
+          CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
+          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          jbx publish \
+            --publish \
+            --file "${{ matrix.project }}/jbx.json" \
+            --version "$VERSION" \
+            --output "target/${{ matrix.project }}-central-bundle.zip" \
+            --target-dir "target/publish/${{ matrix.project }}" \
+            --cache-dir .jbx-cache
+```
+
+Two details matter:
+
+- The PR workflow runs `--dry-run --skip-signing` through a script so contributors can verify jars, POMs, sources, javadocs, docs sidecars, and bundle layout without secrets.
+- Only the release/manual workflow runs `--publish`; publishing from ordinary PR CI would be reckless and noisy.
+
 ## Descriptor and directives
 
 Descriptor fields override or replace matching source directives where both exist:
