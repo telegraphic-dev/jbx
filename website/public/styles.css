@@ -191,8 +191,12 @@ pre code { background: none; border: 0; padding: 0; }
   text-decoration: none;
 }
 .toc a:hover, .toc a[aria-current="page"] { background: var(--surface); color: var(--text); border: 1px solid var(--line); }
-footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--soft); }
-footer span:last-child { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--soft); }
+footer > span:first-child { display: inline-flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
+footer > span:first-child a { padding: 0; }
+footer span:last-child { display: flex; flex-wrap: nowrap; gap: 8px; justify-content: flex-end; flex: 0 0 auto; }
+.footer-resource { display: inline-flex; align-items: center; gap: 8px; }
+.footer-icon { display: none; }
 
 @media (prefers-color-scheme: light) {
   :root {
@@ -248,8 +252,12 @@ footer span:last-child { display: flex; flex-wrap: wrap; gap: 8px; justify-conte
   .site-nav { display: none; grid-column: 1 / -1; width: 100%; justify-content: stretch; }
   .site-nav[data-open="true"] { display: grid; grid-template-columns: 1fr; gap: 8px; }
   .site-nav a, .site-nav .theme-toggle { width: 100%; text-align: left; }
-  footer { align-items: flex-start; flex-direction: column; }
-  footer span:last-child { justify-content: flex-start; }
+  footer { gap: 12px; }
+  footer span:last-child { justify-content: flex-end; gap: 10px; }
+  .footer-resource { width: 44px; height: 44px; justify-content: center; padding: 0; border-color: var(--line); background: var(--surface); }
+  .footer-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .footer-icon { display: block; width: 21px; height: 21px; font-size: .72rem; font-weight: 900; letter-spacing: -.04em; line-height: 21px; text-align: center; }
+  .footer-github .footer-icon { width: 22px; height: 22px; }
   .docs-with-toc { display: flex; flex-direction: column; }
   .commands-reference { width: 100%; max-width: 100%; overflow: hidden; }
   .commands-reference p, .commands-reference li { max-width: 30ch; }

@@ -71,7 +71,7 @@ function inline(md) {
         const hrefStart = textEnd + 2;
         const hrefEnd = matchingParen(md, hrefStart - 1);
         if (hrefEnd !== -1) {
-          out += `<a href="${escapeHtml(md.slice(hrefStart, hrefEnd))}">${escapeHtml(md.slice(i + 1, textEnd))}</a>`;
+          out += `<a href="${escapeHtml(md.slice(hrefStart, hrefEnd))}">${inline(md.slice(i + 1, textEnd))}</a>`;
           i = hrefEnd + 1;
           continue;
         }
@@ -196,7 +196,7 @@ const commandDocs = [
 
 function shell({ title, description, body, route, rawPath }) {
   const canonical = `${site.origin}${route === '/' ? '/' : route}`;
-  const mdLink = rawPath ? `<a href="${escapeHtml(rawPath)}">Markdown</a>` : '';
+  const mdLink = rawPath ? `<a class="footer-resource footer-markdown" href="${escapeHtml(rawPath)}" aria-label="Markdown"><span class="footer-icon" aria-hidden="true">MD</span><span class="footer-label">Markdown</span></a>` : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -225,7 +225,7 @@ ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.
 <main>${body}</main>
 <footer>
   <span>jbx by <a href="https://telegraphic.dev">telegraphic.dev</a></span>
-  <span>${mdLink}<a href="https://github.com/telegraphic-dev/jbx">GitHub</a></span>
+  <span>${mdLink}<a class="footer-resource footer-github" href="https://github.com/telegraphic-dev/jbx" aria-label="GitHub"><svg class="footer-icon" aria-hidden="true" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.67 0 8.19c0 3.62 2.29 6.68 5.47 7.76.4.08.55-.18.55-.4 0-.2-.01-.86-.01-1.56-2.01.38-2.53-.5-2.69-.95-.09-.23-.48-.95-.82-1.14-.28-.16-.68-.55-.01-.56.63-.01 1.08.59 1.23.83.72 1.24 1.87.89 2.33.68.07-.53.28-.89.51-1.09-1.78-.21-3.64-.91-3.64-4.04 0-.89.31-1.62.82-2.19-.08-.21-.36-1.04.08-2.16 0 0 .67-.22 2.2.84A7.42 7.42 0 0 1 8 3.94c.68 0 1.36.09 2 .27 1.53-1.06 2.2-.84 2.2-.84.44 1.12.16 1.95.08 2.16.51.57.82 1.3.82 2.19 0 3.14-1.87 3.83-3.65 4.04.29.25.54.75.54 1.52 0 1.09-.01 1.97-.01 2.24 0 .22.15.48.55.4A8.11 8.11 0 0 0 16 8.19C16 3.67 12.42 0 8 0Z"/></svg><span class="footer-label">GitHub</span></a></span>
 </footer>
 <script>
 (() => {
