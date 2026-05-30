@@ -3950,6 +3950,7 @@ const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
 const DEFAULT_OPENREWRITE_VERSION: &str = "8.56.1";
 const JBX_REWRITE_HELPER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-rewrite:0.1.2";
 const JBX_REWRITE_MAIN_CLASS: &str = "dev.telegraphic.jbx.rewrite.JbxRewrite";
+const JBX_REWRITE_HELPER_SOURCE: &str = include_str!("rewrite_helper/JbxRewrite.java");
 const SLF4J_VERSION: &str = "2.0.17";
 
 #[derive(Debug, Clone)]
@@ -4257,18 +4258,52 @@ fn resolve_rewrite_backend(
             java_home.display()
         )
     })?;
+    let runtime_coordinates = rewrite_runtime_coordinates(modules, java_major, rewrite_version);
+    let helper_coordinate = rewrite_helper_coordinate();
+    let helper_override = std::env::var_os("JBX_REWRITE_HELPER_COORDINATE").is_some();
+
+    let mut published_coordinates = runtime_coordinates.clone();
+    published_coordinates.insert(helper_coordinate.clone());
+    let published_coordinate_vec = published_coordinates.into_iter().collect::<Vec<_>>();
+    match jbx::resolver::resolve_classpath(&published_coordinate_vec, &repos, &deps_cache) {
+        Ok(classpath) => {
+            let java = jbx::jdk::java_bin_path(&java_home);
+            Ok(RewriteBackend { java, classpath })
+        }
+        Err(error) if !helper_override && helper_coordinate == JBX_REWRITE_HELPER_COORDINATE => {
+            let fallback_coordinate_vec = runtime_coordinates.into_iter().collect::<Vec<_>>();
+            let mut classpath =
+                jbx::resolver::resolve_classpath(&fallback_coordinate_vec, &repos, &deps_cache)
+                    .with_context(|| {
+                        format!(
+                            "failed to resolve OpenRewrite runtime dependencies after default helper coordinate {helper_coordinate} was unavailable: {error}"
+                        )
+                    })?;
+            let helper_classes = compile_rewrite_helper(&cache, &classpath, &java_home)?;
+            classpath.push(helper_classes);
+            let java = jbx::jdk::java_bin_path(&java_home);
+            Ok(RewriteBackend { java, classpath })
+        }
+        Err(error) => Err(error).with_context(|| {
+            format!("failed to resolve OpenRewrite helper coordinate {helper_coordinate}")
+        }),
+    }
+}
+
+fn rewrite_runtime_coordinates(
+    modules: &[String],
+    java_major: u32,
+    rewrite_version: &str,
+) -> BTreeSet<String> {
     let mut coordinates = BTreeSet::new();
-    coordinates.insert(rewrite_helper_coordinate());
+    coordinates.insert(format!("org.openrewrite:rewrite-java:{rewrite_version}"));
     coordinates.insert(rewrite_java_runtime_coordinate(java_major, rewrite_version));
     coordinates.insert(format!("org.slf4j:slf4j-api:{SLF4J_VERSION}"));
     coordinates.insert(format!("org.slf4j:slf4j-nop:{SLF4J_VERSION}"));
     for module in modules {
         coordinates.insert(rewrite_module_coordinate(module, rewrite_version));
     }
-    let coordinate_vec = coordinates.into_iter().collect::<Vec<_>>();
-    let classpath = jbx::resolver::resolve_classpath(&coordinate_vec, &repos, &deps_cache)?;
-    let java = jbx::jdk::java_bin_path(&java_home);
-    Ok(RewriteBackend { java, classpath })
+    coordinates
 }
 
 fn rewrite_helper_coordinate() -> String {
@@ -4515,6 +4550,58 @@ fn normalize_rewrite_option(option: &str, recipes: &[String]) -> Result<String> 
         raw_key
     };
     Ok(format!("{key}={value}"))
+}
+
+fn compile_rewrite_helper(
+    cache: &Path,
+    dependency_classpath: &[PathBuf],
+    java_home: &Path,
+) -> Result<PathBuf> {
+    let helper_root = cache.join("rewrite-helper");
+    let source_path = helper_root.join("src/dev/telegraphic/jbx/rewrite/JbxRewrite.java");
+    let classes_dir = helper_root.join("classes");
+    let stamp_path = helper_root.join("JbxRewrite.sha256");
+    let stamp = format!(
+        "{:x}",
+        <sha2::Sha256 as sha2::Digest>::digest(JBX_REWRITE_HELPER_SOURCE.as_bytes())
+    );
+    let current_stamp = fs::read_to_string(&stamp_path).unwrap_or_default();
+    if current_stamp.trim() == stamp
+        && classes_dir
+            .join("dev/telegraphic/jbx/rewrite/JbxRewrite.class")
+            .exists()
+    {
+        return Ok(classes_dir);
+    }
+    fs::create_dir_all(source_path.parent().unwrap())?;
+    if classes_dir.exists() {
+        fs::remove_dir_all(&classes_dir)?;
+    }
+    fs::create_dir_all(&classes_dir)?;
+    fs::write(&source_path, JBX_REWRITE_HELPER_SOURCE)?;
+    let javac = jbx::jdk::javac_bin_path(java_home);
+    let classpath = std::env::join_paths(dependency_classpath)
+        .context("failed to build rewrite helper compile classpath")?;
+    let output = ProcessCommand::new(&javac)
+        .arg("--release")
+        .arg("17")
+        .arg("-proc:none")
+        .arg("-cp")
+        .arg(classpath)
+        .arg("-d")
+        .arg(&classes_dir)
+        .arg(&source_path)
+        .output()
+        .with_context(|| format!("failed to execute {}", javac.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "failed to compile rewrite helper\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fs::write(stamp_path, stamp)?;
+    Ok(classes_dir)
 }
 
 fn run_rewrite_helper(backend: &RewriteBackend, args: &[String]) -> Result<std::process::Output> {
@@ -4856,6 +4943,7 @@ struct PublishDescriptor {
     scm: Option<PublishScm>,
     java_version: Option<String>,
     deps: Vec<String>,
+    runtime_deps: Vec<String>,
     sources: Vec<String>,
     auto_discover_sources: bool,
     repos: Vec<String>,
@@ -5427,6 +5515,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     let mut scm = None;
     let mut java_version = None;
     let mut deps = Vec::new();
+    let mut runtime_deps = Vec::new();
     let mut sources = Vec::new();
     let mut descriptor_sources_present = false;
     let mut repos = Vec::new();
@@ -5471,6 +5560,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned);
         deps = string_array(&json, "dependencies")?;
+        runtime_deps = string_array(&json, "runtimeDependencies")?;
         descriptor_sources_present = json.get("sources").is_some();
         sources = string_array(&json, "sources")?;
         repos = string_array(&json, "repositories")?;
@@ -5521,6 +5611,9 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     }
     if deps.is_empty() {
         deps = directives.deps.clone();
+    }
+    if runtime_deps.is_empty() {
+        runtime_deps = directives.runtime_deps.clone();
     }
     if sources.is_empty() {
         sources = directives.sources.clone();
@@ -5574,6 +5667,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         scm,
         java_version,
         deps,
+        runtime_deps,
         sources,
         auto_discover_sources: !descriptor_sources_present,
         repos,
@@ -6186,7 +6280,7 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
         .as_deref()
         .map(|url| format!("\n  <url>{}</url>", xml_escape(url)))
         .unwrap_or_default();
-    let dependencies = render_pom_dependencies(&descriptor.deps)?;
+    let dependencies = render_pom_dependencies(&descriptor.deps, &descriptor.runtime_deps)?;
     let licenses = render_pom_licenses(&descriptor.licenses);
     let developers = render_pom_developers(&descriptor.developers);
     let scm = descriptor
@@ -6285,16 +6379,25 @@ fn render_pom_scm(scm: &PublishScm) -> String {
     out
 }
 
-fn render_pom_dependencies(deps: &[String]) -> Result<String> {
+fn render_pom_dependencies(deps: &[String], runtime_deps: &[String]) -> Result<String> {
     let parsed = deps
         .iter()
-        .filter_map(|dep| jbx::resolver::parse_coordinate(dep).ok())
+        .filter_map(|dep| {
+            jbx::resolver::parse_coordinate(dep)
+                .ok()
+                .map(|dep| (dep, None))
+        })
+        .chain(runtime_deps.iter().filter_map(|dep| {
+            jbx::resolver::parse_coordinate(dep)
+                .ok()
+                .map(|dep| (dep, Some("runtime")))
+        }))
         .collect::<Vec<_>>();
     if parsed.is_empty() {
         return Ok(String::new());
     }
     let mut out = String::from("\n  <dependencies>");
-    for dep in parsed {
+    for (dep, scope) in parsed {
         out.push_str("\n    <dependency>");
         out.push_str(&format!(
             "\n      <groupId>{}</groupId>",
@@ -6313,6 +6416,9 @@ fn render_pom_dependencies(deps: &[String]) -> Result<String> {
                 "\n      <classifier>{}</classifier>",
                 xml_escape(classifier)
             ));
+        }
+        if let Some(scope) = scope {
+            out.push_str(&format!("\n      <scope>{}</scope>", xml_escape(scope)));
         }
         out.push_str("\n    </dependency>");
     }

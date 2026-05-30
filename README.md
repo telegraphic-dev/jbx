@@ -67,6 +67,7 @@ Implemented now:
 - directive parsing for:
   - `//JAVA`
   - `//DEPS`
+  - `//RUNTIME`
   - `//REPOS`
   - `//SOURCES`
   - `//FILES`
@@ -196,6 +197,9 @@ jbx dev.telegraphic:hello-tool:1.0.0 -- --help
   "dependencies": [
     "info.picocli:picocli:4.7.7"
   ],
+  "runtimeDependencies": [
+    "org.slf4j:slf4j-nop:2.0.17"
+  ],
   "repositories": [
     "https://repo.maven.apache.org/maven2"
   ]
@@ -211,6 +215,8 @@ CENTRAL_TOKEN_USERNAME=... CENTRAL_TOKEN_PASSWORD=... jbx publish --file jbx.jso
 ```
 
 Use `--version` when release/tag workflows need to publish a different version than the descriptor. The `main` field accepts either a source path (`src/main/java/dev/telegraphic/demo/HelloTool.java`) or a Java FQN (`dev.telegraphic.demo.HelloTool`). If `main` has no extension, `jbx publish` first checks the exact path, then tries `.java`, `.jsh`, and `.jav` next to the descriptor, then scans Java sources under the descriptor directory for a matching package/class declaration; missing main files get an explicit `publish main source not found` error.
+
+Use `dependencies` / `//DEPS` for dependencies needed to compile the published artifact. Use `runtimeDependencies` / `//RUNTIME` for runtime-only implementations that should appear in generated Maven metadata with `runtime` scope without being required on the compile classpath.
 
 For GitHub-hosted repositories, `jbx publish` can prefill Maven Central POM `url`, `licenses`, `developers`, and `scm` metadata from the `origin` remote plus `gh repo view` when those fields are omitted. Put the fields in `jbx.json` when you want explicit release metadata instead of GitHub-derived defaults. Signed Central-ready bundles require a configured GPG key; `--skip-signing` is only for local inspection. Real Portal publishing requires a generated Maven Central user token supplied via environment variables only: preferably `CENTRAL_TOKEN_USERNAME` / `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` containing the base64-encoded `username:password` value expected by the Portal API.
 

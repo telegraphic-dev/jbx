@@ -240,6 +240,62 @@ class Helper {
 }
 
 #[test]
+fn publish_renders_runtime_dependencies_with_runtime_scope() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"public class Hello {
+  public static void main(String[] args) {
+    System.out.println("hello");
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbx.json"),
+        r#"{
+  "main": "Hello.java",
+  "group": "dev.telegraphic.demo",
+  "id": "runtime-tool",
+  "version": "1.0.0",
+  "description": "Runtime tool",
+  "url": "https://github.com/telegraphic-dev/runtime-tool",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic"}],
+  "scm": {"connection": "scm:git:https://github.com/telegraphic-dev/runtime-tool.git", "url": "https://github.com/telegraphic-dev/runtime-tool"},
+  "runtimeDependencies": ["org.slf4j:slf4j-nop:2.0.17"]
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("bundle.zip");
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--file")
+        .arg(tmp.path().join("jbx.json"))
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let base = "dev/telegraphic/demo/runtime-tool/1.0.0";
+    let pom = zip_entry(&bundle, &format!("{base}/runtime-tool-1.0.0.pom"));
+    assert!(pom.contains("<groupId>org.slf4j</groupId>"), "{pom}");
+    assert!(pom.contains("<artifactId>slf4j-nop</artifactId>"), "{pom}");
+    assert!(pom.contains("<version>2.0.17</version>"), "{pom}");
+    assert!(pom.contains("<scope>runtime</scope>"), "{pom}");
+}
+
+#[test]
 fn publish_defaults_to_jbx_json_descriptor() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(

@@ -37,6 +37,7 @@ impl KeyValue {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Directives {
     pub deps: Vec<String>,
+    pub runtime_deps: Vec<String>,
     pub repos: Vec<String>,
     pub sources: Vec<String>,
     pub files: Vec<String>,
@@ -1208,6 +1209,7 @@ pub fn parse_directives(source: &str) -> Directives {
 
         match key {
             "DEPS" => directives.deps.extend(split_directive_words(value)),
+            "RUNTIME" => directives.runtime_deps.extend(split_directive_words(value)),
             "REPOS" => directives.repos.extend(split_directive_words(value)),
             "SOURCES" => directives.sources.extend(split_directive_words(value)),
             "FILES" => directives.files.extend(split_directive_words(value)),
