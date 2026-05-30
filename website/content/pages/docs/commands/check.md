@@ -20,7 +20,7 @@ Run javac `-Xlint:all` and Error Prone by default, optionally as structured diag
 jbx check src --json
 jbx check src/main/java --json
 jbx check Hello.java --no-error-prone --json
-jbx check src test --fail-on-warn --json
+jbx check src test --warnings-as-errors --json
 ```
 
 ## Real-life examples
