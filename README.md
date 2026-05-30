@@ -1,6 +1,6 @@
 # jbx
 
-`jbx` is the single agent-friendly entry point to the Java ecosystem: Java script running, Maven tool execution, testing, formatting, publishing, cache management, documentation, diagnostics, and JDK handling behind one CLI.
+`jbx` is the single agent-friendly entry point to the Java ecosystem: Java script running, executable artifact execution, testing, formatting, publishing, cache management, documentation, diagnostics, and JDK handling behind one CLI.
 
 ```bash
 curl -fsSL https://jbx.telegraphic.dev/install.sh | bash

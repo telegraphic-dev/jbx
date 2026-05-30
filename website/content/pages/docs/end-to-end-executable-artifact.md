@@ -1,9 +1,9 @@
 ---
-title: End-to-end Maven tool guide
+title: End-to-end executable artifact guide
 description: Build a Java CLI with the jbx development loop, publish it to Maven Central, and run it back from Maven coordinates.
 ---
 
-# End-to-end Maven tool guide
+# End-to-end executable artifact guide
 
 This walkthrough takes one small Java CLI from source to `jbx group:artifact:version`. The example is deliberately mundane: a word-count tool with options, file input, standard input, useful exit codes, and one real dependency. That is representative enough to exercise the parts that matter without turning the guide into a framework cosplay convention.
 
