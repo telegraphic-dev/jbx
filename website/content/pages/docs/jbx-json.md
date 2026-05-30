@@ -259,6 +259,7 @@ jobs:
         env:
           CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
           CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
           VERSION="${{ github.event.inputs.version }}"
           if [ -z "$VERSION" ]; then
@@ -268,7 +269,7 @@ jobs:
             --publish \
             --file "${{ matrix.project }}/jbx.json" \
             --version "$VERSION" \
-            --gpg-key "${{ secrets.GPG_KEY_ID }}" \
+            --gpg-key "$GPG_KEY_ID" \
             --output "target/${{ matrix.project }}-central-bundle.zip" \
             --target-dir "target/publish/${{ matrix.project }}" \
             --cache-dir .jbx-cache

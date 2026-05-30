@@ -55,6 +55,7 @@ steps:
     env:
       CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
       CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+      GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
     run: |
       VERSION="${{ github.event.inputs.version }}"
       if [ -z "$VERSION" ]; then
@@ -64,7 +65,7 @@ steps:
         --publish \
         --file jbx.json \
         --version "$VERSION" \
-        --gpg-key "${{ secrets.GPG_KEY_ID }}" \
+        --gpg-key "$GPG_KEY_ID" \
         --output target/central-bundle.zip \
         --target-dir target/publish \
         --cache-dir .jbx-cache
