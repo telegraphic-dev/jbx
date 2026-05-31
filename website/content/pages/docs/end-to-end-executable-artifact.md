@@ -246,9 +246,9 @@ jbx publish \
 Once Central has indexed the artifact, anyone can run it directly:
 
 ```bash
-jbx dev.acme.tools:word-stats:1.0.0 -- --help
-jbx dev.acme.tools:word-stats:1.0.0 -- sample.txt
-jbx dev.acme.tools:word-stats:1.0.0 -- --min-length 5 --json sample.txt
+jbx dev.acme.tools:word-stats:1.0.0 --help
+jbx dev.acme.tools:word-stats:1.0.0 sample.txt
+jbx dev.acme.tools:word-stats:1.0.0 --min-length 5 --json sample.txt
 ```
 
 `jbx publish` writes a `Main-Class` manifest entry when the source has an inferable `main`, so executable artifacts do not need `--main` at run time. Library artifacts without a main class still publish normally; they just produce a plain JAR without `Main-Class`.

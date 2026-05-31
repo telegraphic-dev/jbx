@@ -64,7 +64,7 @@ The command checks the selected JDK, Maven Central reachability, cache writabili
 Executable Maven artifacts can be invoked directly:
 
 ```bash
-jbx dev.telegraphic:hello-tool:1.0.0 -- --help
+jbx dev.telegraphic:hello-tool:1.0.0 --help
 ```
 
 Use `--main` when an artifact exposes more than one entry point. For the full publish-and-run path, see the [end-to-end executable artifact guide](/docs/end-to-end-executable-artifact/).

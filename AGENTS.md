@@ -113,7 +113,7 @@ If Docker/release packaging changes, build or dry-run the exact changed path loc
 - Native export should build through normal Java compilation first, then invoke GraalVM `native-image` with classpath, `//NATIVE_OPTIONS`, and CLI `--native-option` values.
 - Use fake external tools in integration tests when testing invocation shape (`native-image`, formatters, launchers) rather than requiring the real tool for every CI run.
 - `jbx test` uses JUnit Platform Console Standalone by default. Preserve failing-test exit codes. `--json` should convert JUnit XML, not scrape console text.
-- Tool execution via Maven coordinates is available through `jbx <GAV> -- [args...]`; keep it tested in `tests/maven_tool_command.rs`.
+- Tool execution via Maven coordinates is available through `jbx <GAV> [args...]`; keep it tested in `tests/maven_tool_command.rs`.
 
 ## Release workflow
 

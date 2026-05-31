@@ -20,7 +20,6 @@ jbx run report.java --month 2026-05
 jbx com.example:report-cli --month 2026-05
 ```
 
-For artifacts produced by `jbx publish`, prefer coordinate execution without `--main`; published executable JARs carry `Main-Class` in the manifest. Use `--main` only to override or disambiguate.
 
 ## Passing arguments
 

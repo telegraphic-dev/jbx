@@ -163,7 +163,7 @@ jbx check src --no-error-prone --json
 jbx run Hello.java world
 # hello world
 
-jbx dev.telegraphic:hello-tool:1.0.0 -- --help
+jbx dev.telegraphic:hello-tool:1.0.0 --help
 # runs an executable JAR from Maven coordinates
 ```
 
