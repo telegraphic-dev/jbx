@@ -8585,7 +8585,15 @@ fn main() -> Result<()> {
     let progress = progress_options(cli.quiet, cli.verbose, cli.progress);
     let code = match cli.command {
         Some(Commands::Run(cmd)) => {
-            let progress = progress_options(cmd.quiet, cmd.verbose, cmd.progress);
+            let progress = progress_options(
+                cli.quiet || cmd.quiet,
+                cli.verbose || cmd.verbose,
+                if cmd.progress == ProgressModeArg::Auto {
+                    cli.progress
+                } else {
+                    cmd.progress
+                },
+            );
             if should_run_as_maven_tool_shorthand(&cmd.script) {
                 maven_tool::run(maven_tool::MavenToolOptions {
                     coordinate: cmd.script.to_string_lossy().into_owned(),
