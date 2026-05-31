@@ -209,7 +209,6 @@ jbx publish --file jbx.json --serve 0 --skip-signing
 ```bash
 jbx --repo local="http://127.0.0.1:<printed-port>/" \
   dev.acme.tools:word-stats:1.0.0 \
-  --main dev.acme.tools.WordStats \
   -- sample.txt
 ```
 
@@ -248,11 +247,11 @@ jbx publish \
 Once Central has indexed the artifact, anyone can run it directly:
 
 ```bash
-jbx dev.acme.tools:word-stats:1.0.0 --main dev.acme.tools.WordStats -- --help
-jbx dev.acme.tools:word-stats:1.0.0 --main dev.acme.tools.WordStats -- sample.txt
-jbx dev.acme.tools:word-stats:1.0.0 --main dev.acme.tools.WordStats -- --min-length 5 --json sample.txt
+jbx dev.acme.tools:word-stats:1.0.0 -- --help
+jbx dev.acme.tools:word-stats:1.0.0 -- sample.txt
+jbx dev.acme.tools:word-stats:1.0.0 -- --min-length 5 --json sample.txt
 ```
 
-`--main` names the entry point inside the artifact. If a future artifact is packaged as an executable JAR with a `Main-Class` manifest, it can omit that flag.
+`jbx publish` writes a `Main-Class` manifest entry when the source has an inferable `main`, so executable artifacts do not need `--main` at run time. Library artifacts without a main class still publish normally; they just produce a plain JAR without `Main-Class`.
 
 For users, this is the payoff: no generated project, no wrapper script, no manual classpath. The Maven coordinate is the executable handle.
