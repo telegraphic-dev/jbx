@@ -20,7 +20,7 @@ use jbx::{
     resolve_catalog_alias, run_java, split_directive_words, trust_add, trust_clear, trust_entries,
     trust_remove, AliasAddOptions, AliasRemoveOptions, AppInstallOptions, BuildOptions,
     CatalogAddOptions, ExportKind, ExportOptions, InitOptions, KeyValue, NativeExportOptions,
-    RunOptions,
+    ProgressOptions, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -45,12 +45,49 @@ struct Cli {
     #[arg(long = "main")]
     main_class: Option<String>,
 
+    /// Suppress jbx lifecycle/progress messages; program stdout/stderr still pass through.
+    #[arg(long = "quiet", short = 'q')]
+    quiet: bool,
+
+    /// Show jbx lifecycle/progress messages even when auto mode would stay quiet.
+    #[arg(long = "verbose", short = 'v')]
+    verbose: bool,
+
+    /// Control jbx lifecycle/progress messages. Progress is written to stderr.
+    #[arg(long = "progress", value_enum, default_value_t = ProgressModeArg::Auto)]
+    progress: ProgressModeArg,
+
     /// Script to run, or Maven coordinates to launch as a Java tool.
     script: Option<PathBuf>,
 
     /// Arguments passed to the script/tool when no subcommand is given.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum ProgressModeArg {
+    Auto,
+    Always,
+    Never,
+}
+
+impl From<ProgressModeArg> for jbx::ProgressMode {
+    fn from(value: ProgressModeArg) -> Self {
+        match value {
+            ProgressModeArg::Auto => jbx::ProgressMode::Auto,
+            ProgressModeArg::Always => jbx::ProgressMode::Always,
+            ProgressModeArg::Never => jbx::ProgressMode::Never,
+        }
+    }
+}
+
+fn progress_options(quiet: bool, verbose: bool, progress: ProgressModeArg) -> ProgressOptions {
+    ProgressOptions {
+        quiet,
+        verbose,
+        mode: progress.into(),
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -109,6 +146,18 @@ enum Commands {
 
 #[derive(Parser, Debug)]
 struct RunCommand {
+    /// Suppress jbx lifecycle/progress messages; program stdout/stderr still pass through.
+    #[arg(long = "quiet", short = 'q')]
+    quiet: bool,
+
+    /// Show jbx lifecycle/progress messages even when auto mode would stay quiet.
+    #[arg(long = "verbose", short = 'v')]
+    verbose: bool,
+
+    /// Control jbx lifecycle/progress messages. Progress is written to stderr.
+    #[arg(long = "progress", value_enum, default_value_t = ProgressModeArg::Auto)]
+    progress: ProgressModeArg,
+
     /// Additional dependency coordinates, same shape as //DEPS.
     #[arg(long = "deps")]
     deps: Vec<String>,
@@ -164,10 +213,10 @@ struct RunCommand {
     #[arg(long = "trust")]
     trust: bool,
 
-    /// Java source file.
+    /// Java source file or Maven coordinates to launch.
     script: PathBuf,
 
-    /// Arguments passed to the script.
+    /// Arguments passed to the script/tool.
     #[arg(trailing_var_arg = true)]
     args: Vec<String>,
 }
@@ -7655,7 +7704,8 @@ fn insert_separator_after_top_level_target(args: Vec<OsString>) -> Vec<OsString>
         "doctor", "app", "alias", "catalog", "export", "template", "resolve", "fetch", "search",
         "test", "fmt", "graph", "rewrite", "skill", "jdk", "help",
     ];
-    const TOP_LEVEL_VALUE_OPTIONS: &[&str] = &["--repo", "--repos", "--cache-dir", "--main"];
+    const TOP_LEVEL_VALUE_OPTIONS: &[&str] =
+        &["--repo", "--repos", "--cache-dir", "--main", "--progress"];
 
     let mut skip_value = false;
     for i in 1..args.len() {
@@ -7706,6 +7756,7 @@ fn insert_separator_after_run_script(args: Vec<OsString>) -> Vec<OsString> {
         "--javaagent",
         "--main",
         "--cache-dir",
+        "--progress",
     ];
 
     let mut skip_value = false;
@@ -7787,7 +7838,7 @@ const BUNDLED_SKILLS: &[SkillEntry] = &[
     },
     SkillEntry {
         name: "jbx-run",
-        description: "Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.",
+        description: "Compile and run one Java source file or launch a Maven executable artifact, including Java 25 compact scripts, with JBang-style directives and CLI overrides.",
         page: include_str!("../website/content/pages/docs/commands/run.md"),
     },
     SkillEntry {
@@ -8531,23 +8582,47 @@ fn is_probably_remote_url(value: &str) -> bool {
 
 fn main() -> Result<()> {
     let cli = Cli::parse_from(normalized_cli_args());
+    let progress = progress_options(cli.quiet, cli.verbose, cli.progress);
     let code = match cli.command {
-        Some(Commands::Run(cmd)) => run_java(apply_alias_to_run(RunOptions {
-            script: cmd.script,
-            script_args: cmd.args,
-            extra_deps: split_cli_words(&cmd.deps),
-            extra_repos: split_cli_words(&cmd.repos),
-            extra_sources: split_cli_words(&cmd.sources),
-            extra_files: split_cli_words(&cmd.files),
-            classpath: cmd.classpath,
-            javac_options: cmd.javac_options,
-            runtime_options: cmd.runtime_options,
-            java_agents: split_cli_key_values(&cmd.java_agents),
-            java_version: cmd.java_version,
-            main_class: cmd.main_class,
-            cache_dir: cmd.cache_dir,
-            trust_remote: cmd.trust,
-        })?)?,
+        Some(Commands::Run(cmd)) => {
+            let progress = progress_options(
+                cli.quiet || cmd.quiet,
+                cli.verbose || cmd.verbose,
+                if cmd.progress == ProgressModeArg::Auto {
+                    cli.progress
+                } else {
+                    cmd.progress
+                },
+            );
+            if should_run_as_maven_tool_shorthand(&cmd.script) {
+                maven_tool::run(maven_tool::MavenToolOptions {
+                    coordinate: cmd.script.to_string_lossy().into_owned(),
+                    repos: split_cli_words(&cmd.repos),
+                    cache_dir: cmd.cache_dir,
+                    main_class: cmd.main_class,
+                    args: cmd.args,
+                    progress,
+                })?
+            } else {
+                run_java(apply_alias_to_run(RunOptions {
+                    script: cmd.script,
+                    script_args: cmd.args,
+                    extra_deps: split_cli_words(&cmd.deps),
+                    extra_repos: split_cli_words(&cmd.repos),
+                    extra_sources: split_cli_words(&cmd.sources),
+                    extra_files: split_cli_words(&cmd.files),
+                    classpath: cmd.classpath,
+                    javac_options: cmd.javac_options,
+                    runtime_options: cmd.runtime_options,
+                    java_agents: split_cli_key_values(&cmd.java_agents),
+                    java_version: cmd.java_version,
+                    main_class: cmd.main_class,
+                    cache_dir: cmd.cache_dir,
+                    trust_remote: cmd.trust,
+                    progress,
+                })?)?
+            }
+        }
         Some(Commands::Build(cmd)) => {
             build_java(apply_alias_to_build(BuildOptions {
                 script: cmd.script,
@@ -9040,6 +9115,7 @@ fn main() -> Result<()> {
                     cache_dir: cli.cache_dir,
                     main_class: cli.main_class,
                     args: cli.args,
+                    progress,
                 })?
             } else {
                 run_java(apply_alias_to_run(RunOptions {
@@ -9057,6 +9133,7 @@ fn main() -> Result<()> {
                     main_class: None,
                     cache_dir: None,
                     trust_remote: false,
+                    progress,
                 })?)?
             }
         }

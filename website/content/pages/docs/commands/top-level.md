@@ -35,9 +35,15 @@ For the top-level shorthand, `jbx` options go before the Java file or Maven coor
 
 Use an explicit `--` only when the launched program needs to receive a literal double-dash argument.
 
+## Progress and stdout cleanliness
+
+`jbx` keeps the launched Java program's stdout clean. Lifecycle messages such as dependency resolution, JVM preparation, and launch phases are written to stderr.
+
+Use `--progress auto|always|never` to control those messages. Auto mode is quiet for non-interactive output and emits human feedback only when stderr is an interactive terminal. Use `--quiet` to suppress `jbx` lifecycle messages even when progress is forced, and `--verbose` to opt into lifecycle messages for troubleshooting.
+
 ## Command pages
 
-- [`run`](/docs/commands/run/) — Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
+- [`run`](/docs/commands/run/) — Compile and run one Java source file or launch a Maven executable artifact, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
 - [`build`](/docs/commands/build/) — Compile a script into the jbx cache without running it.
 - [`check`](/docs/commands/check/) — Run javac `-Xlint:all` and Error Prone by default, optionally as structured diagnostics.
 - [`test`](/docs/commands/test/) — Run JUnit tests with the standalone console launcher; optionally collect JaCoCo coverage.
@@ -137,7 +143,7 @@ jbx: one-stop Java toolbox for scripts, tools, and agents
 Usage: jbx [OPTIONS] [SCRIPT] [ARGS]... [COMMAND]
 
 Commands:
-  run       Compile and run a Java source file
+  run       Run Java source or Maven artifact
   build     Compile and store script in the cache without running it
   publish   Prepare Maven Central publishing artifacts
   install   Install the current project into a Maven repository layout
@@ -172,6 +178,9 @@ Options:
       --repo <REPOS>           Additional repository for Maven executable shorthand (id=url format or bare URL)
       --cache-dir <CACHE_DIR>  Override dependency cache directory for Maven executable shorthand
       --main <MAIN_CLASS>      Main class for Maven executable shorthand instead of java -jar
+  -q, --quiet                  Suppress jbx lifecycle/progress messages; program stdout/stderr still pass through
+  -v, --verbose                Show jbx lifecycle/progress messages even when auto mode would stay quiet
+      --progress <PROGRESS>    Control jbx lifecycle/progress messages. Progress is written to stderr [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
   -V, --version                Print version
 ```

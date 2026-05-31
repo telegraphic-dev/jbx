@@ -49,6 +49,88 @@ class Hello {
 }
 
 #[test]
+fn run_progress_goes_to_stderr_and_keeps_stdout_clean() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("Hello.java");
+    fs::write(
+        &src,
+        r#"
+class Hello {
+  public static void main(String[] args) {
+    System.out.println("hello progress");
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = run_jbx(
+        &[
+            std::path::Path::new("run"),
+            std::path::Path::new("--progress"),
+            std::path::Path::new("always"),
+            &src,
+        ],
+        &[],
+    );
+
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "hello progress"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("jbx: preparing"), "{stderr}");
+    assert!(stderr.contains("jbx: running"), "{stderr}");
+}
+
+#[test]
+fn parent_progress_flag_applies_to_run_subcommand() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("Hello.java");
+    fs::write(
+        &src,
+        r#"
+class Hello {
+  public static void main(String[] args) {
+    System.out.println("hello parent progress");
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = run_jbx(
+        &[
+            std::path::Path::new("--progress"),
+            std::path::Path::new("always"),
+            std::path::Path::new("run"),
+            &src,
+        ],
+        &[],
+    );
+
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "hello parent progress"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("jbx: preparing"), "{stderr}");
+    assert!(stderr.contains("jbx: running"), "{stderr}");
+}
+
+#[test]
 fn top_level_java_shorthand_passes_dash_args_without_separator() {
     let tmp = tempfile::tempdir().unwrap();
     let src = tmp.path().join("Args.java");

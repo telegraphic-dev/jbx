@@ -137,6 +137,149 @@ fn jbx_runs_executable_jar_from_gav_shorthand() {
 }
 
 #[test]
+fn maven_tool_progress_goes_to_stderr_and_keeps_stdout_clean() {
+    let tmp = tempfile::tempdir().unwrap();
+    let jar = build_executable_jar(&tmp);
+    let pom = br#"
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.telegraphic</groupId>
+  <artifactId>hello-tool</artifactId>
+  <version>1.0.0</version>
+</project>
+"#
+    .to_vec();
+    let repo = serve_files(HashMap::from([
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.pom",
+            pom,
+        ),
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.jar",
+            jar,
+        ),
+    ]));
+
+    let output = jbx_command()
+        .arg("--progress")
+        .arg("always")
+        .arg("--repo")
+        .arg(format!("local={repo}"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache-progress"))
+        .arg("dev.telegraphic:hello-tool:1.0.0")
+        .arg("--")
+        .arg("stdout")
+        .output()
+        .expect("failed to run jbx Maven executable with progress enabled");
+
+    assert_success(&output);
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "jbx stdout");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("jbx: resolving dependencies"), "{stderr}");
+    assert!(
+        stderr.contains("jbx: running dev.telegraphic:hello-tool:1.0.0"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn maven_tool_quiet_suppresses_progress_even_when_forced() {
+    let tmp = tempfile::tempdir().unwrap();
+    let jar = build_executable_jar(&tmp);
+    let pom = br#"
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.telegraphic</groupId>
+  <artifactId>hello-tool</artifactId>
+  <version>1.0.0</version>
+</project>
+"#
+    .to_vec();
+    let repo = serve_files(HashMap::from([
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.pom",
+            pom,
+        ),
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.jar",
+            jar,
+        ),
+    ]));
+
+    let output = jbx_command()
+        .arg("--progress")
+        .arg("always")
+        .arg("--quiet")
+        .arg("--repo")
+        .arg(format!("local={repo}"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache-quiet"))
+        .arg("dev.telegraphic:hello-tool:1.0.0")
+        .output()
+        .expect("failed to run quiet jbx Maven executable");
+
+    assert_success(&output);
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "jbx");
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn explicit_run_accepts_gav_and_keeps_progress_on_stderr() {
+    let tmp = tempfile::tempdir().unwrap();
+    let jar = build_executable_jar(&tmp);
+    let pom = br#"
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.telegraphic</groupId>
+  <artifactId>hello-tool</artifactId>
+  <version>1.0.0</version>
+</project>
+"#
+    .to_vec();
+    let repo = serve_files(HashMap::from([
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.pom",
+            pom,
+        ),
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.jar",
+            jar,
+        ),
+    ]));
+
+    let output = jbx_command()
+        .arg("run")
+        .arg("--progress")
+        .arg("always")
+        .arg("--repo")
+        .arg(format!("local={repo}"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache-run-gav"))
+        .arg("dev.telegraphic:hello-tool:1.0.0")
+        .arg("--")
+        .arg("run-gav")
+        .output()
+        .expect("failed to run jbx run Maven executable");
+
+    assert_success(&output);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "jbx run-gav"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("jbx: resolving dependencies"), "{stderr}");
+    assert!(
+        stderr.contains("jbx: running dev.telegraphic:hello-tool:1.0.0"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn jbx_runs_executable_jar_from_gav() {
     let tmp = tempfile::tempdir().unwrap();
     let jar = build_executable_jar(&tmp);
