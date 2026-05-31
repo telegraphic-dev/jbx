@@ -20,6 +20,7 @@ jbx run report.java --month 2026-05
 jbx com.example:report-cli --month 2026-05
 ```
 
+
 ## Passing arguments
 
 `run` options go before the script path. After the script path, arguments belong to the Java program, including Picocli-style options such as `--help`, `--input`, or `--verbose`.

@@ -6154,7 +6154,20 @@ fn prepare_publish_repository(
         descriptor.coordinates.id, descriptor.coordinates.version
     );
     let jar = artifact_dir.join(format!("{prefix}.jar"));
-    write_directory_jar(&build.classes_dir, &jar)?;
+    let staged_main_source = fs::read_to_string(&staged.script).with_context(|| {
+        format!(
+            "failed to read staged main source {}",
+            staged.script.display()
+        )
+    })?;
+    let manifest_main_class = if build.directives.main_class.is_some()
+        || publish_source_has_main_entrypoint(&staged_main_source)
+    {
+        build.main_class.as_deref()
+    } else {
+        None
+    };
+    write_classes_jar_with_manifest(&build.classes_dir, &jar, manifest_main_class)?;
     let sources_jar = artifact_dir.join(format!("{prefix}-sources.jar"));
     write_directory_jar(&staging_dir, &sources_jar)?;
     let javadoc_jar = artifact_dir.join(format!("{prefix}-javadoc.jar"));
@@ -6342,6 +6355,14 @@ fn looks_like_compact_source(source: &str) -> bool {
     !has_type_declaration && source.contains("void main(")
 }
 
+fn publish_source_has_main_entrypoint(source: &str) -> bool {
+    let main_re = regex::Regex::new(
+        r"(?m)\b(?:public\s+)?(?:static\s+)?void\s+main\s*\(\s*(?:String\s*(?:\[\]\s*)?\w*|String\s*\.\.\.\s*\w*)?\s*\)",
+    )
+    .expect("valid main method regex");
+    main_re.is_match(source)
+}
+
 fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
     let name = descriptor
         .name
@@ -6517,6 +6538,39 @@ fn write_directory_jar(source_dir: &Path, jar: &Path) -> Result<()> {
     let mut zip = zip::ZipWriter::new(file);
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    write_directory_entries(&mut zip, source_dir, options)?;
+    zip.finish()?;
+    Ok(())
+}
+
+fn write_classes_jar_with_manifest(
+    source_dir: &Path,
+    jar: &Path,
+    main_class: Option<&str>,
+) -> Result<()> {
+    let file = fs::File::create(jar)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("META-INF/MANIFEST.MF", options)?;
+    zip.write_all(render_publish_manifest(main_class).as_bytes())?;
+    write_directory_entries(&mut zip, source_dir, options)?;
+    zip.finish()?;
+    Ok(())
+}
+
+fn render_publish_manifest(main_class: Option<&str>) -> String {
+    match main_class {
+        Some(main_class) => format!("Manifest-Version: 1.0\nMain-Class: {main_class}\n\n"),
+        None => "Manifest-Version: 1.0\n\n".to_string(),
+    }
+}
+
+fn write_directory_entries(
+    zip: &mut zip::ZipWriter<fs::File>,
+    source_dir: &Path,
+    options: zip::write::SimpleFileOptions,
+) -> Result<()> {
     for entry in walkdir::WalkDir::new(source_dir) {
         let entry = entry?;
         if !entry.file_type().is_file() {
@@ -6530,7 +6584,6 @@ fn write_directory_jar(source_dir: &Path, jar: &Path) -> Result<()> {
         zip.start_file(rel, options)?;
         zip.write_all(&fs::read(entry.path())?)?;
     }
-    zip.finish()?;
     Ok(())
 }
 

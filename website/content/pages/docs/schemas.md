@@ -16,7 +16,7 @@ Descriptor schemas live here too, so editors and agents can discover the same pu
 ```json
 {
   "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
-  "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+  "main": "HelloTool.java",
   "group": "dev.telegraphic.demo",
   "id": "hello-tool",
   "version": "1.0.0",

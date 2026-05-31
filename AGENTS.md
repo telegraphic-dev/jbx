@@ -25,7 +25,7 @@ This repo is `jbx` in user-facing CLI terms: a Rust-native JBang-compatible Java
 
 - Repository: `telegraphic-dev/juv`.
 - Main binary: `jbx`.
-- `jbx Hello.java` runs a script, while `jbx group:artifact:version -- args` runs an executable Maven tool.
+- `jbx Hello.java` runs a script, while `jbx group:artifact:version -- args` runs an executable artifact.
 - Rust crate version in source may intentionally stay as placeholder `0.0.0`; release workflows derive publish versions from tags.
 - Java baseline is **25**. If `--java` or `//JAVA` is omitted, preserve Java 25 behavior unless a test proves otherwise.
 - The implementation should avoid depending on Coursier or JBang at runtime. Use native Rust resolver/JDK/catalog logic where it already exists.
@@ -113,7 +113,7 @@ If Docker/release packaging changes, build or dry-run the exact changed path loc
 - Native export should build through normal Java compilation first, then invoke GraalVM `native-image` with classpath, `//NATIVE_OPTIONS`, and CLI `--native-option` values.
 - Use fake external tools in integration tests when testing invocation shape (`native-image`, formatters, launchers) rather than requiring the real tool for every CI run.
 - `jbx test` uses JUnit Platform Console Standalone by default. Preserve failing-test exit codes. `--json` should convert JUnit XML, not scrape console text.
-- Tool execution via Maven coordinates is available through `jbx <GAV> -- [args...]`; keep it tested in `tests/maven_tool_command.rs`.
+- Tool execution via Maven coordinates is available through `jbx <GAV> [args...]`; keep it tested in `tests/maven_tool_command.rs`.
 
 ## Release workflow
 

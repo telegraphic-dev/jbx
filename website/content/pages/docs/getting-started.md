@@ -59,15 +59,15 @@ jbx doctor https://example.com/Hello.java --cache-dir .jbx-cache --repo snapshot
 
 The command checks the selected JDK, Maven Central reachability, cache writability, formatter availability and fallback, remote script trust, dependency resolution health, dependency version drift, and whether a newer `jbx` release exists. GPG and GraalVM `native-image` are contextual: they are skipped by default and checked when `--publish` or `--native` asks for them.
 
-## Maven tools
+## Executable artifacts
 
 Executable Maven artifacts can be invoked directly:
 
 ```bash
-jbx dev.telegraphic:hello-tool:1.0.0 -- --help
+jbx dev.telegraphic:hello-tool:1.0.0 --help
 ```
 
-Use `--main` when an artifact exposes more than one entry point.
+Use `--main` when an artifact exposes more than one entry point. For the full publish-and-run path, see the [end-to-end executable artifact guide](/docs/end-to-end-executable-artifact/).
 
 ## OpenRewrite recipes
 
@@ -100,7 +100,7 @@ jbx rewrite recipes yaml --search format --detail --json
 
 ```json
 {
-  "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+  "main": "HelloTool.java",
   "group": "dev.telegraphic.demo",
   "id": "hello-tool",
   "version": "1.0.0",

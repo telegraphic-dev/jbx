@@ -51,6 +51,15 @@ fn zip_names_from_bytes(bytes: Vec<u8>) -> Vec<String> {
     names
 }
 
+fn zip_entry_from_bytes(bytes: Vec<u8>, name: &str) -> String {
+    let reader = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader).unwrap();
+    let mut entry = archive.by_name(name).unwrap();
+    let mut content = String::new();
+    std::io::Read::read_to_string(&mut entry, &mut content).unwrap();
+    content
+}
+
 #[test]
 fn publish_dry_run_uses_flat_id_metadata_and_version_override() {
     let tmp = tempfile::tempdir().unwrap();
@@ -179,6 +188,10 @@ class Helper {
     );
 
     let pom = zip_entry(&bundle, &format!("{base}/hello-tool-2.0.0.pom"));
+    let manifest = zip_entry_from_bytes(
+        zip_entry_bytes(&bundle, &format!("{base}/hello-tool-2.0.0.jar")),
+        "META-INF/MANIFEST.MF",
+    );
     let sources_names = zip_names_from_bytes(zip_entry_bytes(
         &bundle,
         &format!("{base}/hello-tool-2.0.0-sources.jar"),
@@ -206,6 +219,10 @@ class Helper {
             .iter()
             .any(|name| name.ends_with("Hello.html") || name.ends_with("HelloTool.html")),
         "{javadoc_names:?}"
+    );
+    assert!(
+        manifest.contains("Main-Class: dev.telegraphic.demo.hello.Hello"),
+        "{manifest}"
     );
     assert!(
         pom.contains("<groupId>dev.telegraphic.demo</groupId>"),
@@ -237,6 +254,70 @@ class Helper {
     assert!(pom.contains("<groupId>info.picocli</groupId>"), "{pom}");
     assert!(pom.contains("<artifactId>picocli</artifactId>"), "{pom}");
     assert!(pom.contains("<version>4.7.7</version>"), "{pom}");
+}
+
+#[test]
+fn publish_allows_library_artifacts_without_main_class() {
+    let tmp = tempfile::tempdir().unwrap();
+    let script = tmp.path().join("Library.java");
+    fs::write(
+        &script,
+        r#"
+package dev.telegraphic.demo.library;
+
+public class Library {
+  public static String message() {
+    return "hello";
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbx.json"),
+        r#"{
+  "main": "Library.java",
+  "group": "dev.telegraphic.demo",
+  "id": "library-artifact",
+  "version": "1.0.0",
+  "description": "Reusable library",
+  "url": "https://github.com/telegraphic-dev/library-artifact",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic", "organizationUrl": "https://github.com/telegraphic-dev"}],
+  "scm": {
+    "connection": "scm:git:https://github.com/telegraphic-dev/library-artifact.git",
+    "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/library-artifact.git",
+    "url": "https://github.com/telegraphic-dev/library-artifact"
+  }
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("bundle.zip");
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--file")
+        .arg(tmp.path().join("jbx.json"))
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let base = "dev/telegraphic/demo/library-artifact/1.0.0";
+    let manifest = zip_entry_from_bytes(
+        zip_entry_bytes(&bundle, &format!("{base}/library-artifact-1.0.0.jar")),
+        "META-INF/MANIFEST.MF",
+    );
+    assert!(manifest.contains("Manifest-Version: 1.0"), "{manifest}");
+    assert!(!manifest.contains("Main-Class:"), "{manifest}");
 }
 
 #[test]

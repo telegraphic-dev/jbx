@@ -1,6 +1,6 @@
 # jbx
 
-`jbx` is the single agent-friendly entry point to the Java ecosystem: Java script running, Maven tool execution, testing, formatting, publishing, cache management, documentation, diagnostics, and JDK handling behind one CLI.
+`jbx` is the single agent-friendly entry point to the Java ecosystem: Java script running, executable artifact execution, testing, formatting, publishing, cache management, documentation, diagnostics, and JDK handling behind one CLI.
 
 ```bash
 curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
@@ -163,15 +163,17 @@ jbx check src --no-error-prone --json
 jbx run Hello.java world
 # hello world
 
-jbx dev.telegraphic:hello-tool:1.0.0 -- --help
+jbx dev.telegraphic:hello-tool:1.0.0 --help
 # runs an executable JAR from Maven coordinates
 ```
+
+The website includes an end-to-end guide that builds a representative Picocli-based Java CLI, verifies it with the jbx development loop, publishes it to Maven Central, and runs it back as `jbx group:artifact:version`.
 
 ### `jbx.json` publish descriptor
 
 ```json
 {
-  "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+  "main": "HelloTool.java",
   "group": "dev.telegraphic.demo",
   "id": "hello-tool",
   "version": "1.0.0",
@@ -216,7 +218,7 @@ CENTRAL_TOKEN_USERNAME=... CENTRAL_TOKEN_PASSWORD=... jbx publish --file jbx.jso
 # or set CENTRAL_PORTAL_TOKEN to base64(username:password)
 ```
 
-Use `--version` when release/tag workflows need to publish a different version than the descriptor. The `main` field accepts either a source path (`src/main/java/dev/telegraphic/demo/HelloTool.java`) or a Java FQN (`dev.telegraphic.demo.HelloTool`). If `main` has no extension, `jbx publish` first checks the exact path, then tries `.java`, `.jsh`, and `.jav` next to the descriptor, then scans Java sources under the descriptor directory for a matching package/class declaration; missing main files get an explicit `publish main source not found` error.
+Use `--version` when release/tag workflows need to publish a different version than the descriptor. The `main` field accepts either a source file (`HelloTool.java`) or a Java FQN (`dev.telegraphic.demo.HelloTool`). If `main` has no extension, `jbx publish` first checks the exact path, then tries `.java`, `.jsh`, and `.jav` next to the descriptor, then scans Java sources under the descriptor directory for a matching package/class declaration; missing main files get an explicit `publish main source not found` error.
 
 Use `dependencies` / `//DEPS` for dependencies needed to compile the published artifact. Use `runtimeDependencies` / `//RUNTIME` for runtime-only implementations that should appear in generated Maven metadata with `runtime` scope without being required on the compile classpath.
 
