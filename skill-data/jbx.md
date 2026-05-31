@@ -40,7 +40,7 @@ Use `--progress auto|always|never` to control those messages. Auto mode is quiet
 
 ## Command pages
 
-- [`run`](/docs/commands/run/) — Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
+- [`run`](/docs/commands/run/) — Compile and run one Java source file or launch a Maven executable artifact, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
 - [`build`](/docs/commands/build/) — Compile a script into the jbx cache without running it.
 - [`check`](/docs/commands/check/) — Run javac `-Xlint:all` and Error Prone by default, optionally as structured diagnostics.
 - [`test`](/docs/commands/test/) — Run JUnit tests with the standalone console launcher; optionally collect JaCoCo coverage.
