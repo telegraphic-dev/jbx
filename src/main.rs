@@ -46,15 +46,15 @@ struct Cli {
     main_class: Option<String>,
 
     /// Suppress jbx lifecycle/progress messages; program stdout/stderr still pass through.
-    #[arg(long = "quiet", short = 'q', global = true)]
+    #[arg(long = "quiet", short = 'q')]
     quiet: bool,
 
     /// Show jbx lifecycle/progress messages even when auto mode would stay quiet.
-    #[arg(long = "verbose", short = 'v', global = true)]
+    #[arg(long = "verbose", short = 'v')]
     verbose: bool,
 
     /// Control jbx lifecycle/progress messages. Progress is written to stderr.
-    #[arg(long = "progress", value_enum, default_value_t = ProgressModeArg::Auto, global = true)]
+    #[arg(long = "progress", value_enum, default_value_t = ProgressModeArg::Auto)]
     progress: ProgressModeArg,
 
     /// Script to run, or Maven coordinates to launch as a Java tool.
@@ -146,6 +146,18 @@ enum Commands {
 
 #[derive(Parser, Debug)]
 struct RunCommand {
+    /// Suppress jbx lifecycle/progress messages; program stdout/stderr still pass through.
+    #[arg(long = "quiet", short = 'q')]
+    quiet: bool,
+
+    /// Show jbx lifecycle/progress messages even when auto mode would stay quiet.
+    #[arg(long = "verbose", short = 'v')]
+    verbose: bool,
+
+    /// Control jbx lifecycle/progress messages. Progress is written to stderr.
+    #[arg(long = "progress", value_enum, default_value_t = ProgressModeArg::Auto)]
+    progress: ProgressModeArg,
+
     /// Additional dependency coordinates, same shape as //DEPS.
     #[arg(long = "deps")]
     deps: Vec<String>,
@@ -8573,6 +8585,7 @@ fn main() -> Result<()> {
     let progress = progress_options(cli.quiet, cli.verbose, cli.progress);
     let code = match cli.command {
         Some(Commands::Run(cmd)) => {
+            let progress = progress_options(cmd.quiet, cmd.verbose, cmd.progress);
             if should_run_as_maven_tool_shorthand(&cmd.script) {
                 maven_tool::run(maven_tool::MavenToolOptions {
                     coordinate: cmd.script.to_string_lossy().into_owned(),
