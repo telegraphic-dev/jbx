@@ -168,6 +168,12 @@ jbx run dev.telegraphic:hello-tool:1.0.0 --help
 
 jbx --progress always dev.telegraphic:hello-tool:1.0.0 --help
 # prints jbx lifecycle messages to stderr while stdout remains the tool output
+
+jbx --quiet dev.telegraphic:hello-tool:1.0.0 --help
+# suppresses jbx lifecycle messages; stdout/stderr from the tool still pass through
+
+jbx --verbose Hello.java
+# shows jbx lifecycle messages for troubleshooting even when auto mode would stay quiet
 ```
 
 The website includes an end-to-end guide that builds a representative Picocli-based Java CLI, verifies it with the jbx development loop, publishes it to Maven Central, and runs it back as `jbx group:artifact:version`.
