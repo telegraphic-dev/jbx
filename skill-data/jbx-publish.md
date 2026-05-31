@@ -30,6 +30,8 @@ jbx publish --file jbx.json --dry-run
 jbx publish --file jbx.json --serve 0
 ```
 
+A normal jbx artifact can be just `Tool.java` plus `jbx.json`; do not create Maven/Gradle-style `src/main/java/...` directories unless the project already wants them. If the source has an inferable `main`, `publish` writes `Main-Class` into the JAR manifest. Library sources without a main publish as plain JARs without `Main-Class`.
+
 Use `publish` in dry-run or local-serve mode during PR work. Real Portal upload belongs in release automation with approved credentials. The descriptor fields are documented in the [`jbx.json` reference](/docs/jbx-json/).
 
 ### Publish a release through GitHub Actions

@@ -11,7 +11,7 @@ Use this when you only need local install/serve workflows or when Git metadata c
 ```json
 {
   "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
-  "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+  "main": "HelloTool.java",
   "group": "dev.telegraphic.demo",
   "id": "hello-tool",
   "version": "1.0.0",
@@ -61,7 +61,7 @@ Real publishing needs normal Maven metadata: project URL, license, developer, an
     "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/hello-tool.git",
     "url": "https://github.com/telegraphic-dev/hello-tool"
   },
-  "sources": ["src/main/java/dev/telegraphic/demo/HelloTool.java"],
+  "sources": ["HelloTool.java"],
   "repositories": ["snapshots=https://repo.example.test/maven"]
 }
 ```
@@ -100,7 +100,7 @@ jbx publish --file jbx.json --publish
 ```json
 {
   "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
-  "main": "src/main/java/acme/tools/CleanImports.java",
+  "main": "CleanImports.java",
   "group": "com.acme.tools",
   "id": "clean-imports",
   "version": "0.3.0",
@@ -138,13 +138,13 @@ If the repository has helpers, examples, or generated files you do not want in t
 ```json
 {
   "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
-  "main": "src/main/java/dev/acme/App.java",
+  "main": "App.java",
   "group": "dev.acme",
   "id": "app",
   "version": "1.0.0",
   "sources": [
-    "src/main/java/dev/acme/App.java",
-    "src/main/java/dev/acme/AppSupport.java"
+    "App.java",
+    "AppSupport.java"
   ]
 }
 ```

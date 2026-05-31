@@ -122,7 +122,7 @@
   "examples": [
     {
       "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
-      "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+      "main": "HelloTool.java",
       "group": "dev.telegraphic.demo",
       "id": "hello-tool",
       "version": "1.0.0",
@@ -150,7 +150,7 @@
         "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/hello-tool.git",
         "url": "https://github.com/telegraphic-dev/hello-tool"
       },
-      "sources": ["src/main/java/dev/telegraphic/demo/HelloTool.java"],
+      "sources": ["HelloTool.java"],
       "repositories": ["snapshots=https://repo.example.test/maven"]
     }
   ]

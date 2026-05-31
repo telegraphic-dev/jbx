@@ -100,7 +100,7 @@ jbx rewrite recipes yaml --search format --detail --json
 
 ```json
 {
-  "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+  "main": "HelloTool.java",
   "group": "dev.telegraphic.demo",
   "id": "hello-tool",
   "version": "1.0.0",

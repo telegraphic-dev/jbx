@@ -14,10 +14,9 @@ Use your own Maven namespace below. `dev.acme.tools` is a placeholder.
 ```bash
 mkdir word-stats
 cd word-stats
-mkdir -p src/main/java/dev/acme/tools
 ```
 
-Create `src/main/java/dev/acme/tools/WordStats.java`:
+Create `WordStats.java`:
 
 ```java
 //JAVA 21
@@ -138,7 +137,7 @@ Create `jbx.json` next to it:
 ```json
 {
   "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
-  "main": "src/main/java/dev/acme/tools/WordStats.java",
+  "main": "WordStats.java",
   "group": "dev.acme.tools",
   "id": "word-stats",
   "version": "1.0.0",
@@ -166,17 +165,17 @@ Create `jbx.json` next to it:
 Start with the fast checks:
 
 ```bash
-jbx check src/main/java
-jbx build src/main/java/dev/acme/tools/WordStats.java
-jbx fmt src/main/java
+jbx check WordStats.java
+jbx build WordStats.java
+jbx fmt WordStats.java
 ```
 
 Run the tool locally while editing:
 
 ```bash
 printf 'one two three\nsmall words are useful\n' > sample.txt
-jbx src/main/java/dev/acme/tools/WordStats.java sample.txt
-jbx src/main/java/dev/acme/tools/WordStats.java --min-length 5 --json sample.txt
+jbx WordStats.java sample.txt
+jbx WordStats.java --min-length 5 --json sample.txt
 ```
 
 Expected shape:
