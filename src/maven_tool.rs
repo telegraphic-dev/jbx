@@ -10,6 +10,7 @@ pub struct MavenToolOptions {
     pub cache_dir: Option<PathBuf>,
     pub main_class: Option<String>,
     pub args: Vec<String>,
+    pub progress: crate::ProgressOptions,
 }
 
 pub fn maven_repositories(repo_args: &[String]) -> Vec<crate::resolver::Repository> {
@@ -65,6 +66,8 @@ pub fn run(options: MavenToolOptions) -> Result<i32> {
     };
     let repos = maven_repositories(&options.repos);
     let requested_coordinate = options.coordinate;
+    let progress = options.progress;
+    progress.phase(format!("resolving dependencies for {requested_coordinate}"));
     let coordinate = resolve_maven_tool_coordinate(&requested_coordinate, &repos)?;
     let coordinates = vec![coordinate.clone()];
     let classpath = crate::resolver::resolve_classpath(&coordinates, &repos, &cache_dir)?;
@@ -95,6 +98,7 @@ pub fn run(options: MavenToolOptions) -> Result<i32> {
         }
     }
     java.args(options.args);
+    progress.phase(format!("running {coordinate}"));
     let status = java.status().context("failed to launch java")?;
     #[cfg(unix)]
     {

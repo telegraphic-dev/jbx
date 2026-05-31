@@ -16,7 +16,7 @@ This repository is intentionally aiming for JBang compatibility rather than inve
 
 Implemented now:
 
-- `jbx run <script.java> [args...]`
+- `jbx run <script.java|GAV> [args...]`
 - `jbx build <script.java>`
 - `jbx check [path...]` checks Java source files/directories with javac `-Xlint:all` and Error Prone by default; checked files include companion sources declared with `//SOURCES`
 - `jbx init <script.java>` built-in Java template generation
@@ -163,8 +163,11 @@ jbx check src --no-error-prone --json
 jbx run Hello.java world
 # hello world
 
-jbx dev.telegraphic:hello-tool:1.0.0 --help
+jbx run dev.telegraphic:hello-tool:1.0.0 --help
 # runs an executable JAR from Maven coordinates
+
+jbx --progress always dev.telegraphic:hello-tool:1.0.0 --help
+# prints jbx lifecycle messages to stderr while stdout remains the tool output
 ```
 
 The website includes an end-to-end guide that builds a representative Picocli-based Java CLI, verifies it with the jbx development loop, publishes it to Maven Central, and runs it back as `jbx group:artifact:version`.

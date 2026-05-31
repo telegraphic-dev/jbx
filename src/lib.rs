@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::write::SimpleFileOptions;
@@ -12,6 +12,46 @@ use zip::write::SimpleFileOptions;
 pub mod jdk;
 pub mod maven_tool;
 pub mod resolver;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ProgressMode {
+    Auto,
+    Always,
+    Never,
+}
+
+impl Default for ProgressMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
+pub struct ProgressOptions {
+    pub quiet: bool,
+    pub verbose: bool,
+    pub mode: ProgressMode,
+}
+
+impl ProgressOptions {
+    pub fn should_emit(self) -> bool {
+        if self.quiet || self.mode == ProgressMode::Never {
+            return false;
+        }
+        if self.mode == ProgressMode::Always || self.verbose {
+            return true;
+        }
+        std::io::stderr().is_terminal()
+            && std::env::var_os("CI").is_none()
+            && std::env::var("TERM").map_or(true, |term| term != "dumb")
+    }
+
+    pub fn phase(self, message: impl AsRef<str>) {
+        if self.should_emit() {
+            eprintln!("jbx: {}", message.as_ref());
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeyValue {
@@ -73,6 +113,7 @@ pub struct RunOptions {
     pub main_class: Option<String>,
     pub cache_dir: Option<PathBuf>,
     pub trust_remote: bool,
+    pub progress: ProgressOptions,
 }
 
 #[derive(Debug, Clone)]
@@ -1839,8 +1880,10 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
 }
 
 pub fn run_java(options: RunOptions) -> Result<i32> {
+    let progress = options.progress;
     let script_args = options.script_args;
     let runtime_options = options.runtime_options;
+    progress.phase(format!("preparing {}", options.script.display()));
     let build = build_java(BuildOptions {
         script: options.script,
         extra_deps: options.extra_deps,
@@ -1861,6 +1904,10 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
         anyhow!("could not infer main class; add //MAIN fully.qualified.ClassName")
     })?;
 
+    progress.phase(format!(
+        "resolving Java {}",
+        build.directives.java_version.as_deref().unwrap_or("25")
+    ));
     let jdk_root = jdk::resolve_jdk(&build.directives.java_version, true)?;
     let java = jdk::java_bin_path(&jdk_root).display().to_string();
     let mut runtime_cp = vec![build.classes_dir];
@@ -1884,6 +1931,7 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
     java_cmd.arg("-cp").arg(join_classpath(&runtime_cp));
     java_cmd.arg(main_class);
     java_cmd.args(script_args);
+    progress.phase("running Java program");
     let status = java_cmd
         .status()
         .with_context(|| format!("failed to execute {java}"))?;

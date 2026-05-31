@@ -1,31 +1,39 @@
 ---
 title: jbx run command
-description: Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
+description: Compile and run one Java source file or launch a Maven executable artifact, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
 ---
 
 # `run`
 
-Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
+Compile and run one Java source file or launch a Maven executable artifact, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
 
 ## When to use it
 
 - Run a self-contained Java script without creating a Maven or Gradle project.
 - Launch a compact script that carries `//DEPS`, `//JAVA`, `//SOURCES`, and runtime options in the file.
+- Launch an executable Maven artifact from coordinates such as `group:artifact:version`.
 - Smoke-test an executable example after `jbx check --json` has confirmed the source compiles.
 
 ## Common workflows
 
 ```bash
 jbx run report.java --month 2026-05
-jbx com.example:report-cli --month 2026-05
+jbx run com.example:report-cli --month 2026-05
+jbx run --progress always com.example:report-cli --month 2026-05
 ```
 
 
 ## Passing arguments
 
-`run` options go before the script path. After the script path, arguments belong to the Java program, including Picocli-style options such as `--help`, `--input`, or `--verbose`.
+`run` options go before the script path or Maven coordinate. After the target, arguments belong to the Java program, including Picocli-style options such as `--help`, `--input`, or `--verbose`.
 
 Use an explicit `--` only when the Java program needs to receive a literal double-dash argument.
+
+## Progress and stdout cleanliness
+
+Program stdout belongs to the Java program. `jbx` lifecycle messages for dependency resolution, JVM preparation, and launch phases are written to stderr so commands like `jbx run app.java > result.json` do not corrupt stdout.
+
+Use `--progress auto|always|never` to control lifecycle messages. Auto mode emits human feedback only when stderr is interactive; `--progress always` is useful for debugging cold cache downloads; `--quiet` suppresses `jbx` lifecycle messages.
 
 ## Real-life examples
 
@@ -81,13 +89,13 @@ This section is copied from the CLI help for this release so the page explains t
 ### `jbx run`
 
 ```text
-Compile and run a Java source file
+Run Java source or Maven artifact
 
 Usage: jbx run [OPTIONS] <SCRIPT> [ARGS]...
 
 Arguments:
-  <SCRIPT>   Java source file
-  [ARGS]...  Arguments passed to the script
+  <SCRIPT>   Java source file or Maven coordinates to launch
+  [ARGS]...  Arguments passed to the script/tool
 
 Options:
       --deps <DEPS>                       Additional dependency coordinates, same shape as //DEPS
@@ -102,6 +110,9 @@ Options:
       --main <MAIN_CLASS>                 Override //MAIN / inferred class name
       --cache-dir <CACHE_DIR>             Override cache directory
       --trust                             Trust this remote script content hash before running
+  -q, --quiet                             Suppress jbx lifecycle/progress messages; program stdout/stderr still pass through
+  -v, --verbose                           Show jbx lifecycle/progress messages even when auto mode would stay quiet
+      --progress <PROGRESS>               Control jbx lifecycle/progress messages. Progress is written to stderr [default: auto] [possible values: auto, always, never]
   -h, --help                              Print help
 ```
 
